@@ -2,10 +2,37 @@ import re
 from pathlib import Path
 
 import typer
+from jinja2 import Environment, PackageLoader, select_autoescape
 from rich.console import Console
 
 app = typer.Typer()
 console = Console()
+
+
+def _render_resource_templates(project_dir: Path, context: dict) -> list[str]:
+    """Render resource templates into the project. Returns list of created file paths."""
+    env = Environment(
+        loader=PackageLoader("calango_cli", "templates"),
+        keep_trailing_newline=True,
+        autoescape=select_autoescape(enabled_extensions=("html",), default=False),
+    )
+
+    snake = context["resource_snake"]
+    files = [
+        ("resource/model.py.jinja", f"app/models/{snake}.py"),
+        ("resource/schemas.py.jinja", f"app/schemas/{snake}.py"),
+    ]
+    created = []
+    for template_name, output_path in files:
+        template = env.get_template(template_name)
+        content = template.render(**context)
+        out = project_dir / output_path
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(content)
+        created.append(output_path)
+        console.print(f"  [dim]created[/dim] {output_path}")
+
+    return created
 
 
 def _to_snake_case(name: str) -> str:
@@ -46,5 +73,10 @@ def resource(
     plural = _to_plural(snake)
 
     console.print(f"[green]✓[/green]  Generating resource: {name}")
-    # Template rendering will be added in subsequent tasks
-    _ = plural  # used in templates
+    context = {
+        "resource_name": name,
+        "resource_snake": snake,
+        "resource_plural": plural,
+    }
+    _render_resource_templates(project_dir, context)
+    console.print(f"[green]✓[/green]  Resource {name} generated successfully.")

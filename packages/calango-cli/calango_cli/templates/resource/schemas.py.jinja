@@ -1,0 +1,27 @@
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+
+from calango import CalangoModel
+
+
+class {{ resource_name }}Input(CalangoModel):
+    """Fields required to create a new {{ resource_name }}."""
+    # TODO: add input fields
+    # name: str
+
+
+class {{ resource_name }}Update(CalangoModel):
+    """Fields that can be updated on {{ resource_name }}. All optional."""
+    # TODO: add update fields
+    # name: str | None = None
+
+
+class {{ resource_name }}Output(CalangoModel):
+    """Fields returned when reading a {{ resource_name }}."""
+
+    id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+    # TODO: add output fields matching the model

@@ -72,3 +72,45 @@ def test_to_plural_y_ending():
     from calango_cli.commands.generate import _to_plural
 
     assert _to_plural("category") == "categories"
+
+
+def test_generate_resource_creates_model_file(tmp_path):
+    """generate resource Order creates app/models/order.py."""
+    _make_project(tmp_path)
+    result = runner.invoke(app, ["generate", "resource", "Order", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+    assert (tmp_path / "app" / "models" / "order.py").exists()
+
+
+def test_generate_resource_model_contains_class_name(tmp_path):
+    """app/models/order.py contains class Order."""
+    _make_project(tmp_path)
+    runner.invoke(app, ["generate", "resource", "Order", "--path", str(tmp_path)])
+    content = (tmp_path / "app" / "models" / "order.py").read_text()
+    assert "class Order(Base):" in content
+
+
+def test_generate_resource_creates_schemas_file(tmp_path):
+    """generate resource Order creates app/schemas/order.py."""
+    _make_project(tmp_path)
+    result = runner.invoke(app, ["generate", "resource", "Order", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+    assert (tmp_path / "app" / "schemas" / "order.py").exists()
+
+
+def test_generate_resource_schemas_has_input_output_update(tmp_path):
+    """app/schemas/order.py contains OrderInput, OrderOutput, OrderUpdate."""
+    _make_project(tmp_path)
+    runner.invoke(app, ["generate", "resource", "Order", "--path", str(tmp_path)])
+    content = (tmp_path / "app" / "schemas" / "order.py").read_text()
+    assert "class OrderInput(CalangoModel):" in content
+    assert "class OrderOutput(CalangoModel):" in content
+    assert "class OrderUpdate(CalangoModel):" in content
+
+
+def test_generate_resource_compound_name_uses_snake_case_filename(tmp_path):
+    """generate resource ProductItem creates app/models/product_item.py."""
+    _make_project(tmp_path)
+    result = runner.invoke(app, ["generate", "resource", "ProductItem", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+    assert (tmp_path / "app" / "models" / "product_item.py").exists()
