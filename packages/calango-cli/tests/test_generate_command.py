@@ -158,3 +158,39 @@ def test_generate_resource_service_has_crud_methods(tmp_path):
     assert "async def list(" in content
     assert "async def update(" in content
     assert "async def delete(" in content
+
+
+def test_generate_resource_creates_router_file(tmp_path):
+    """generate resource Order creates app/routers/order.py."""
+    _make_project(tmp_path)
+    result = runner.invoke(app, ["generate", "resource", "Order", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+    assert (tmp_path / "app" / "routers" / "order.py").exists()
+
+
+def test_generate_resource_router_has_prefix(tmp_path):
+    """app/routers/order.py contains prefix='/orders'."""
+    _make_project(tmp_path)
+    runner.invoke(app, ["generate", "resource", "Order", "--path", str(tmp_path)])
+    content = (tmp_path / "app" / "routers" / "order.py").read_text()
+    assert "prefix=\"/orders\"" in content
+
+
+def test_generate_resource_router_has_crud_endpoints(tmp_path):
+    """app/routers/order.py contains POST, GET, PATCH, DELETE endpoints."""
+    _make_project(tmp_path)
+    runner.invoke(app, ["generate", "resource", "Order", "--path", str(tmp_path)])
+    content = (tmp_path / "app" / "routers" / "order.py").read_text()
+    assert "@router.post(" in content
+    assert "@router.get(" in content
+    assert "@router.patch(" in content
+    assert "@router.delete(" in content
+
+
+def test_generate_resource_router_uses_correct_service(tmp_path):
+    """app/routers/order.py imports and uses OrderService."""
+    _make_project(tmp_path)
+    runner.invoke(app, ["generate", "resource", "Order", "--path", str(tmp_path)])
+    content = (tmp_path / "app" / "routers" / "order.py").read_text()
+    assert "from app.services.order import OrderService" in content
+    assert "OrderService" in content
