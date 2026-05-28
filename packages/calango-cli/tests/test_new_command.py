@@ -174,3 +174,55 @@ def test_new_compose_postgres_uses_project_name(tmp_path):
     runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
     content = (tmp_path / "my-api" / "compose.yml").read_text()
     assert "my-api" in content
+
+
+def test_new_creates_ci_yml(tmp_path):
+    """calango new creates .github/workflows/ci.yml."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert (tmp_path / "my-api" / ".github" / "workflows" / "ci.yml").is_file()
+
+
+def test_new_ci_yml_has_quality_job(tmp_path):
+    """.github/workflows/ci.yml contains quality job."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    content = (tmp_path / "my-api" / ".github" / "workflows" / "ci.yml").read_text()
+    assert "quality:" in content
+
+
+def test_new_ci_yml_has_integration_tests_job(tmp_path):
+    """.github/workflows/ci.yml contains test-integration job."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    content = (tmp_path / "my-api" / ".github" / "workflows" / "ci.yml").read_text()
+    assert "test-integration:" in content
+
+
+def test_new_creates_cd_yml(tmp_path):
+    """calango new creates .github/workflows/cd.yml."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert (tmp_path / "my-api" / ".github" / "workflows" / "cd.yml").is_file()
+
+
+def test_new_creates_pull_request_template(tmp_path):
+    """calango new creates .github/pull_request_template.md."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert (tmp_path / "my-api" / ".github" / "pull_request_template.md").is_file()
+
+
+def test_new_pull_request_template_has_definition_of_done(tmp_path):
+    """.github/pull_request_template.md has Definition of Done checklist."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    content = (tmp_path / "my-api" / ".github" / "pull_request_template.md").read_text()
+    assert "Definition of Done" in content
+
+
+def test_new_creates_gitignore(tmp_path):
+    """calango new creates .gitignore."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert (tmp_path / "my-api" / ".gitignore").is_file()
+
+
+def test_new_gitignore_ignores_env_file(tmp_path):
+    """.gitignore ignores .env file."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    content = (tmp_path / "my-api" / ".gitignore").read_text()
+    assert ".env" in content

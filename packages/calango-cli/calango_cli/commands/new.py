@@ -17,6 +17,10 @@ _TEMPLATE_FILES = [
     ("alembic.ini.jinja", "alembic.ini"),
     ("Dockerfile.jinja", "Dockerfile"),
     ("compose.yml.jinja", "compose.yml"),
+    ("github/workflows/ci.yml.jinja", ".github/workflows/ci.yml"),
+    ("github/workflows/cd.yml.jinja", ".github/workflows/cd.yml"),
+    ("github/pull_request_template.md.jinja", ".github/pull_request_template.md"),
+    ("gitignore.jinja", ".gitignore"),
 ]
 
 
