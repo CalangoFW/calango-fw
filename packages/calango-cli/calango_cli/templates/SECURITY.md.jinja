@@ -1,0 +1,36 @@
+# Security Policy — {{ project_name }}
+
+## Supported Versions
+
+| Version | Supported |
+|---------|-----------|
+| 0.x.x   | ✅ Yes    |
+
+## Reporting a Vulnerability
+
+Please report security vulnerabilities by emailing the maintainers directly.
+Do NOT create a public GitHub issue for security vulnerabilities.
+
+## Security Controls
+
+Implemented by the Calango Framework:
+
+- JWT RS256 authentication (when identity plugin active)
+- Automatic security headers (X-Content-Type-Options, HSTS, X-Frame-Options)
+- Global exception handler — never exposes stack traces in production
+- CORS closed by default — origins must be explicitly configured
+- Rate limiting on authentication endpoints
+- Argon2 password hashing (when identity plugin active)
+
+## Threat Model
+
+### Critical assets
+- [ ] User credentials and tokens
+- [ ] Personal data (PII)
+- [ ] Financial data (if applicable)
+
+### Attack surface
+- [ ] Public endpoints (no authentication required)
+- [ ] Authenticated endpoints
+- [ ] Incoming webhooks from external services
+- [ ] Background jobs with privileged access

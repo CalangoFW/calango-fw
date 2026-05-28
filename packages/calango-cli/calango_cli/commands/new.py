@@ -21,6 +21,12 @@ _TEMPLATE_FILES = [
     ("github/workflows/cd.yml.jinja", ".github/workflows/cd.yml"),
     ("github/pull_request_template.md.jinja", ".github/pull_request_template.md"),
     ("gitignore.jinja", ".gitignore"),
+    ("pyproject.toml.jinja", "pyproject.toml"),
+    ("env.example.jinja", ".env.example"),
+    ("CLAUDE.md.jinja", "CLAUDE.md"),
+    ("cursorrules.jinja", ".cursorrules"),
+    ("CHANGELOG.md.jinja", "CHANGELOG.md"),
+    ("SECURITY.md.jinja", "SECURITY.md"),
 ]
 
 

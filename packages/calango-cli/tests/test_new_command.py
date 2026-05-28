@@ -226,3 +226,67 @@ def test_new_gitignore_ignores_env_file(tmp_path):
     runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
     content = (tmp_path / "my-api" / ".gitignore").read_text()
     assert ".env" in content
+
+
+def test_new_creates_pyproject_toml(tmp_path):
+    """calango new creates pyproject.toml."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert (tmp_path / "my-api" / "pyproject.toml").is_file()
+
+
+def test_new_pyproject_has_calango_dependency(tmp_path):
+    """pyproject.toml lists calango-core as a dependency."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    content = (tmp_path / "my-api" / "pyproject.toml").read_text()
+    assert "calango-core" in content
+
+
+def test_new_pyproject_has_coverage_gate(tmp_path):
+    """pyproject.toml configures pytest with --cov-fail-under=80."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    content = (tmp_path / "my-api" / "pyproject.toml").read_text()
+    assert "--cov-fail-under=80" in content
+
+
+def test_new_creates_env_example(tmp_path):
+    """calango new creates .env.example."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert (tmp_path / "my-api" / ".env.example").is_file()
+
+
+def test_new_env_example_has_secret_key(tmp_path):
+    """.env.example includes SECURITY__SECRET_KEY placeholder."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    content = (tmp_path / "my-api" / ".env.example").read_text()
+    assert "SECURITY__SECRET_KEY" in content
+
+
+def test_new_creates_claude_md(tmp_path):
+    """calango new creates CLAUDE.md."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert (tmp_path / "my-api" / "CLAUDE.md").is_file()
+
+
+def test_new_claude_md_contains_project_name(tmp_path):
+    """CLAUDE.md contains the project name."""
+    runner.invoke(app, ["new", "my-cool-api", "--path", str(tmp_path)])
+    content = (tmp_path / "my-cool-api" / "CLAUDE.md").read_text()
+    assert "my-cool-api" in content
+
+
+def test_new_creates_cursorrules(tmp_path):
+    """calango new creates .cursorrules."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert (tmp_path / "my-api" / ".cursorrules").is_file()
+
+
+def test_new_creates_changelog(tmp_path):
+    """calango new creates CHANGELOG.md."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert (tmp_path / "my-api" / "CHANGELOG.md").is_file()
+
+
+def test_new_creates_security_md(tmp_path):
+    """calango new creates SECURITY.md."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert (tmp_path / "my-api" / "SECURITY.md").is_file()
