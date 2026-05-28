@@ -1,0 +1,42 @@
+[project]
+name = "{{ project_name }}"
+version = "0.1.0"
+description = "A Calango Framework project"
+requires-python = ">=3.12"
+dependencies = [
+    "calango-core>=0.1.0",
+    "fastapi[standard]>=0.115",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "pydantic-settings>=2.6",
+    "asyncpg>=0.30",
+    "alembic>=1.14",
+    "redis>=5.2",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6",
+    "httpx>=0.28",
+    "ruff>=0.8",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+addopts = "--cov=app --cov-report=term-missing --cov-fail-under=80"
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "S"]
+ignore = ["S101"]  # Allow assert in tests

@@ -1,39 +1,39 @@
-# Calango Framework — Roadmap de Implementação
+# Calango Framework — Implementation Roadmap
 
-> Status: Em desenvolvimento ativo — iniciado em 2026-05-27
-> Abordagem: Milestone-driven, TDD como padrão, solo + IA
+> Status: Active development — started 2026-05-27
+> Approach: Milestone-driven, TDD as default, solo + AI
 
 ---
 
 ## Macro Roadmap — 6 Milestones
 
-| Milestone | Fases | Critério de conclusão |
+| Milestone | Phases | Completion criteria |
 |---|---|---|
-| **M1** "calango new roda" | 0 + 1 + 2 | `calango new minha-api && docker compose up` → API em `:8000` |
-| **M2** "generate resource" | 3 + 4 + 5 | `calango generate resource Produto` → 8 arquivos + testes rodando com banco real |
-| **M3** "SaaS mínimo" | 6 | Auth JWT + RBAC + todos os endpoints protegidos por padrão |
-| **M4** "SaaS core" | 7 + 8 | Multi-tenant (RLS) + pagamentos (Stripe + Pix) |
-| **M5** "AI layer" | 9 | `calango generate agent Suporte` → agente rodando com MCP Server |
-| **M6** "Ecosystem" | 10–13 | Todos os plugins + docs MkDocs publicados |
+| **M1** "calango new works" | 0 + 1 + 2 | `calango new my-api && docker compose up` → API on `:8000` |
+| **M2** "generate resource" | 3 + 4 + 5 | `calango generate resource Product` → 8 files + tests running with real database |
+| **M3** "minimal SaaS" | 6 | JWT auth + RBAC + all endpoints protected by default |
+| **M4** "SaaS core" | 7 + 8 | Multi-tenant (RLS) + payments (Stripe + Pix) |
+| **M5** "AI layer" | 9 | `calango generate agent Support` → agent running with MCP Server |
+| **M6** "Ecosystem" | 10–13 | All plugins + published MkDocs docs |
 
 ---
 
-## M1 — "calango new roda"
+## M1 — "calango new works"
 
-Três sub-fases sequenciais. Resultado: qualquer pessoa clona o repo, instala o CLI e tem um projeto FastAPI rodando em minutos.
+Three sequential sub-phases. Result: anyone clones the repo, installs the CLI, and has a FastAPI project running in minutes.
 
 ---
 
-### Fase 0: Bootstrap do Monorepo
+### Phase 0: Monorepo Bootstrap ✅ Done
 
-**Objetivo:** `uv sync` funciona, `uv run pytest` passa, `uv run ruff check .` passa.
+**Goal:** `uv sync` works, `uv run pytest` passes, `uv run ruff check .` passes.
 
-**Estrutura a criar:**
+**Structure created:**
 
 ```
 calango_fw/
 ├── pyproject.toml                    # UV workspace root
-├── ruff.toml                         # Config compartilhada lint/format
+├── ruff.toml                         # Shared lint/format config
 ├── .python-version                   # "3.12"
 ├── .gitignore
 ├── .pre-commit-config.yaml           # Hooks: ruff, ty
@@ -57,24 +57,24 @@ calango_fw/
 members = ["packages/*"]
 
 [tool.uv]
-dev-dependencies = ["pytest>=8", "pytest-asyncio", "httpx", "ruff", "ty"]
+dev-dependencies = ["pytest>=8", "pytest-asyncio", "httpx", "ruff", "ty", "pytest-cov"]
 ```
 
-**Critério de conclusão:**
-- `uv sync` sem erros
-- `uv run ruff check .` passa (0 erros)
-- `uv run pytest packages/` passa (runner funciona)
-- CI skeleton rodando no GitHub Actions
+**Completion criteria:**
+- `uv sync` without errors
+- `uv run ruff check .` passes (0 errors)
+- `uv run pytest packages/` passes (runner works)
+- CI skeleton running on GitHub Actions
 
 ---
 
-### Fase 1: calango-core base
+### Phase 1: calango-core base ✅ Done
 
-**Objetivo:** Blocos fundamentais do framework. Toda a Fase 2 (CLI) depende deles.
+**Goal:** The fundamental building blocks of the framework. All of Phase 2 (CLI) depends on them.
 
-**Ordem de implementação TDD (teste → implementação → refatorar):**
+**TDD implementation order (test → implement → refactor):**
 
-#### 1.1 — Hierarquia de exceções
+#### 1.1 — Exception hierarchy
 `packages/calango-core/calango/exceptions/__init__.py`
 
 ```python
@@ -84,23 +84,23 @@ CalangoException(Exception)     # base — status_code, message, error_code
   ├── AuthenticationError        # 401
   ├── AuthorizationError         # 403
   ├── ConflictError              # 409
-  ├── RateLimitError             # 429 — com retry_after: int
+  ├── RateLimitError             # 429 — with retry_after: int
   ├── ServiceUnavailableError    # 503
   └── ConfigurationError         # 500
 ```
 
-Testes: `packages/calango-core/tests/test_exceptions.py` — 9 testes, um por tipo.
+Tests: `packages/calango-core/tests/test_exceptions.py` — 9 tests, one per type.
 
-#### 1.2 — Tipos base
+#### 1.2 — Base types
 `packages/calango-core/calango/types/__init__.py`
 
 ```python
-CalangoModel(BaseModel)           # Pydantic com from_attributes=True
+CalangoModel(BaseModel)           # Pydantic with from_attributes=True
 PaginatedResponse[T](BaseModel)   # items, total, page, page_size, pages
-OrderDirection(str, Enum)         # ASC = "asc", DESC = "desc"
+OrderDirection(StrEnum)           # ASC = "asc", DESC = "desc"
 ```
 
-Testes: `packages/calango-core/tests/test_types.py` — 5 testes.
+Tests: `packages/calango-core/tests/test_types.py` — 5 tests.
 
 #### 1.3 — CalangoSettings
 `packages/calango-core/calango/config/__init__.py`
@@ -117,7 +117,7 @@ class RedisSettings(BaseSettings):
     URL: str = "redis://localhost:6379/0"
 
 class SecuritySettings(BaseSettings):
-    SECRET_KEY: str                       # obrigatório, sem default
+    SECRET_KEY: str                       # required, no default
     JWT_ALGORITHM: str = "RS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     CORS_ORIGINS: list[str] = []
@@ -137,7 +137,7 @@ class CalangoSettings(BaseSettings):
     )
 ```
 
-Testes: `packages/calango-core/tests/test_config.py` — 3 testes.
+Tests: `packages/calango-core/tests/test_config.py` — 3 tests.
 
 #### 1.4 — Calango app factory
 `packages/calango-core/calango/core/app.py`
@@ -145,36 +145,33 @@ Testes: `packages/calango-core/tests/test_config.py` — 3 testes.
 ```python
 class Calango(FastAPI):
     def __init__(self, settings: CalangoSettings | None = None, **kwargs):
-        # Configura title, version, lifespan
-        # Registra CalangoMiddleware
-        # Registra exception handlers globais
+        # Configures title, version
+        # Registers CalangoMiddleware
+        # Registers global exception handlers
         ...
-
-    def include_plugin(self, plugin: PluginBase) -> None: ...
 ```
 
-Testes: `packages/calango-core/tests/test_app.py` — 3 testes.
+Tests: `packages/calango-core/tests/test_app.py` — 10 tests.
 
 #### 1.5 — CalangoMiddleware
 `packages/calango-core/calango/core/middleware.py`
 
-- Injeta `request.state.request_id = str(uuid4())`
-- Adiciona headers de segurança (X-Content-Type-Options, X-Frame-Options, HSTS, etc.)
-- Loga request + response em JSON estruturado (sem PII)
-- Injeta `X-Calango-Version` header
+- Injects `request.state.request_id = str(uuid4())`
+- Adds security headers (X-Content-Type-Options, X-Frame-Options, HSTS, etc.)
+- Injects `X-Calango-Version` header
 
 #### 1.6 — Exception handlers
 `packages/calango-core/calango/core/handlers.py`
 
 - `CalangoException` → `{"error": error_code, "message": message, "request_id": ...}`
-- Nunca expõe stack trace em production
-- Exception genérica → 500 com só `request_id`
+- Never exposes stack trace in production
+- Generic exception → 500 with only `request_id`
 
-#### 1.7 — API pública
+#### 1.7 — Public API
 `packages/calango-core/calango/__init__.py`
 
 ```python
-__version__ = "0.1.0"
+__version__ = "0.1.0-dev"
 
 from calango.core.app import Calango
 from calango.config import CalangoSettings
@@ -186,15 +183,15 @@ from calango.exceptions import (
 )
 ```
 
-**Meta Fase 1:** ≥20 testes passando, cobertura ≥80%.
+**Phase 1 result:** 54 tests passing · 97% coverage.
 
 ---
 
-### Fase 2: calango-cli — calango new
+### Phase 2: calango-cli — calango new 🟡 Next
 
-**Objetivo:** `calango new minha-api` gera projeto completo que roda com `docker compose up`.
+**Goal:** `calango new my-api` generates a complete project that runs with `docker compose up`.
 
-**Estrutura do pacote CLI:**
+**CLI package structure:**
 
 ```
 packages/calango-cli/
@@ -204,7 +201,7 @@ packages/calango-cli/
 └── calango_cli/
     ├── main.py              # Typer app root
     ├── commands/
-    │   └── new.py           # calango new <nome> [--db] [--agents] [--ci]
+    │   └── new.py           # calango new <name> [--db] [--agents] [--ci]
     └── templates/           # Jinja2 templates
         ├── app/
         ├── tests/
@@ -214,38 +211,38 @@ packages/calango-cli/
         └── ...
 ```
 
-**20 artefatos gerados por `calango new`:**
+**20 artifacts generated by `calango new`:**
 
-| # | Arquivo | Conteúdo |
+| # | File | Content |
 |---|---|---|
-| 1 | `app/__init__.py` | vazio |
-| 2 | `app/main.py` | `Calango()` com lifespan e settings |
-| 3 | `app/core/__init__.py` | vazio |
+| 1 | `app/__init__.py` | empty |
+| 2 | `app/main.py` | `Calango()` with lifespan and settings |
+| 3 | `app/core/__init__.py` | empty |
 | 4 | `app/core/config.py` | `class Settings(CalangoSettings)` |
-| 5 | `tests/__init__.py` | vazio |
-| 6 | `tests/conftest.py` | fixtures db + client async com rollback |
-| 7 | `alembic/env.py` | configurado para o projeto |
-| 8 | `alembic.ini` | aponta para app.core.config |
+| 5 | `tests/__init__.py` | empty |
+| 6 | `tests/conftest.py` | db + async client fixtures with rollback |
+| 7 | `alembic/env.py` | configured for the project |
+| 8 | `alembic.ini` | points to app.core.config |
 | 9 | `Dockerfile` | 4 stages: base/development/ci/production |
 | 10 | `compose.yml` | app + postgres + redis + minio |
-| 11 | `.github/workflows/ci.yml` | 6 gates progressivos |
-| 12 | `.github/workflows/cd.yml` | staging → production com aprovação |
+| 11 | `.github/workflows/ci.yml` | 6 progressive gates |
+| 12 | `.github/workflows/cd.yml` | staging → production with approval |
 | 13 | `.github/pull_request_template.md` | Definition of Done checklist |
-| 14 | `CLAUDE.md` | Gerado com contexto específico do projeto |
-| 15 | `.cursorrules` | Regras para Cursor |
-| 16 | `pyproject.toml` | deps + ruff + pytest (coverage 80%) |
-| 17 | `.env.example` | todas as variáveis necessárias |
-| 18 | `.gitignore` | Python + UV + Docker padrão |
-| 19 | `CHANGELOG.md` | template Keep a Changelog |
-| 20 | `SECURITY.md` | threat model inicial |
+| 14 | `CLAUDE.md` | Generated with project-specific context |
+| 15 | `.cursorrules` | Rules for Cursor |
+| 16 | `pyproject.toml` | deps + ruff + pytest (80% coverage) |
+| 17 | `.env.example` | all required variables |
+| 18 | `.gitignore` | Python + UV + Docker standard |
+| 19 | `CHANGELOG.md` | Keep a Changelog template |
+| 20 | `SECURITY.md` | initial threat model |
 
-**Meta Fase 2:** ≥37 testes passando. `curl localhost:8000/health` retorna 200 após `docker compose up`.
+**Phase 2 goal:** ≥37 tests passing. `curl localhost:8000/health` returns 200 after `docker compose up`.
 
 ---
 
 ## M2 — "generate resource"
 
-### Fase 3: calango-core — BaseRepository + BaseService
+### Phase 3: calango-core — BaseRepository + BaseService
 
 `packages/calango-core/calango/repository/__init__.py`
 
@@ -269,146 +266,146 @@ class BaseService(Generic[R]):
     def repository(self) -> R: ...
 ```
 
-Inclui: session DI factory (`get_db`), test utilities (`test_db_session`).
+Includes: session DI factory (`get_db`), test utilities (`test_db_session`).
 
-### Fase 4: calango-cli — generate resource
+### Phase 4: calango-cli — generate resource
 
-`calango generate resource <Nome>` gera 8 arquivos:
+`calango generate resource <Name>` generates 8 files:
 
-1. `app/models/<nome>.py` — SQLAlchemy model
-2. `app/schemas/<nome>.py` — Input, Output, Update
-3. `app/repositories/<nome>.py` — herda BaseRepository
-4. `app/services/<nome>.py` — herda BaseService
-5. `app/routers/<nome>.py` — FastAPI router
-6. `tests/unit/test_<nome>_service.py` — 5 casos base com TODO
-7. `tests/integration/test_<nome>_router.py` — casos de segurança (401, 403, BOLA)
-8. `tests/factories/<nome>_factory.py` — factory-boy
+1. `app/models/<name>.py` — SQLAlchemy model
+2. `app/schemas/<name>.py` — Input, Output, Update
+3. `app/repositories/<name>.py` — extends BaseRepository
+4. `app/services/<name>.py` — extends BaseService
+5. `app/routers/<name>.py` — FastAPI router
+6. `tests/unit/test_<name>_service.py` — 5 base cases with TODO
+7. `tests/integration/test_<name>_router.py` — security cases (401, 403, BOLA)
+8. `tests/factories/<name>_factory.py` — factory-boy
 
-Pre-commit hook `calango-no-untested-resource`: falha se `app/services/X.py` existe sem `tests/unit/test_X_service.py`.
+Pre-commit hook `calango-no-untested-resource`: fails if `app/services/X.py` exists without `tests/unit/test_X_service.py`.
 
-### Fase 5: calango-cli — db commands
+### Phase 5: calango-cli — db commands
 
 ```bash
 calango db migrate          # wrapper: uv run alembic upgrade head
-calango db seed             # executa app/seeds/ em ordem
+calango db seed             # runs app/seeds/ in order
 calango db rollback         # uv run alembic downgrade -1
-calango db suggest-indexes  # analisa pg_stat_statements, sugere + gera migration
+calango db suggest-indexes  # analyzes pg_stat_statements, suggests + generates migration
 ```
 
 ---
 
-## M3 — "SaaS mínimo"
+## M3 — "minimal SaaS"
 
-### Fase 6: calango-identity
+### Phase 6: calango-identity
 
 `packages/calango-plugins/calango-identity/`
 
-- Base: FastAPI-Users + JWT RS256 (assimétrico)
+- Base: FastAPI-Users + JWT RS256 (asymmetric)
 - Endpoints: `POST /auth/login`, `/auth/register`, `/auth/refresh`, `/auth/forgot-password`
-- `@public` decorator para endpoints públicos
-- `@require_permission("resource:action")` para RBAC
-- Rate limit em `/auth`: 5/min por IP, 10/hour por email
-- JWT: access=15min, refresh=7 dias com rotation
-- Argon2 para hash de senhas
+- `@public` decorator for public endpoints
+- `@require_permission("resource:action")` for RBAC
+- Rate limit on `/auth`: 5/min per IP, 10/hour per email
+- JWT: access=15min, refresh=7 days with rotation
+- Argon2 for password hashing
 
 ---
 
 ## M4 — "SaaS core"
 
-### Fase 7: calango-multitenancy
+### Phase 7: calango-multitenancy
 
 `packages/calango-plugins/calango-multitenancy/`
 
-- Row-level (padrão): RLS via Postgres, `tenant_id` injetado automaticamente
-- `@tenantable` decorator no model
-- Resolução: subdomain → JWT claim → header `X-Tenant-ID`
-- Schema-level como opção (`--mode=schema`)
+- Row-level (default): RLS via Postgres, `tenant_id` injected automatically
+- `@tenantable` decorator on the model
+- Resolution: subdomain → JWT claim → `X-Tenant-ID` header
+- Schema-level as option (`--mode=schema`)
 
-### Fase 8: calango-payments
+### Phase 8: calango-payments
 
 `packages/calango-plugins/calango-payments/`
 
-- Abstração sobre Stripe e MercadoPago (interface comum)
-- Webhooks com verificação HMAC obrigatória
-- Idempotência por `Idempotency-Key` header
+- Abstraction over Stripe and MercadoPago (common interface)
+- Webhooks with mandatory HMAC verification
+- Idempotency via `Idempotency-Key` header
 
 ---
 
 ## M5 — "AI layer"
 
-### Fase 9: calango-agents
+### Phase 9: calango-agents
 
 `packages/calango-plugins/calango-agents/`
 
-- Agno v2.6+ como engine padrão
+- Agno v2.6+ as default engine
 - `AgentRouter` + decorators `@router.agent()` + `@router.tool()`
-- Tool Registry com schema Pydantic automático
-- MCP Server exposto em `/mcp`
-- `AgentContext` injetado automaticamente (user_id, tenant_id, permissions)
+- Tool Registry with automatic Pydantic schema
+- MCP Server exposed at `/mcp`
+- `AgentContext` injected automatically (user_id, tenant_id, permissions)
 - Human-in-the-loop via `requires_approval=True`
 
 ---
 
 ## M6 — "Ecosystem"
 
-### Fase 10: Plugins de produtividade
-- `calango-search` — PG FTS (padrão), Typesense, Meilisearch
-- `calango-notifications` — email, push, SMS, Slack, webhook outbound
+### Phase 10: Productivity plugins
+- `calango-search` — PG FTS (default), Typesense, Meilisearch
+- `calango-notifications` — email, push, SMS, Slack, outbound webhook
 - `calango-admin` — SQLAdmin + Admin Copilot (NL2SQL)
-- `calango-media` — S3/GCS/MinIO, conversões async
-- `calango-background` — ARQ (padrão), Celery, DLQ automática
+- `calango-media` — S3/GCS/MinIO, async conversions
+- `calango-background` — ARQ (default), Celery, automatic DLQ
 
-### Fase 11: Model mixins
+### Phase 11: Model mixins
 `soft-delete`, `audit-log`, `sluggable`, `sortable`, `nested-tree`, `taggable`
 
-### Fase 12: SaaS avançado
+### Phase 12: Advanced SaaS
 `calango-plans`, `calango-feature-flags`, `calango-teams`
 
-### Fase 13: DX e documentação
-- `calango context` — regenera CLAUDE.md automaticamente
-- `calango check:security` — auditoria pré-deploy
-- MkDocs Material — documentação publicada
+### Phase 13: DX and documentation
+- `calango context` — auto-regenerates CLAUDE.md
+- `calango check:security` — pre-deploy audit
+- MkDocs Material — published documentation
 
 ---
 
-## Verificação end-to-end do M1
+## M1 end-to-end verification
 
 ```bash
 # Setup
 uv sync
-uv run pytest packages/ -v       # todos os testes passam
-uv run ruff check .               # 0 erros
+uv run pytest packages/ -v       # all tests pass
+uv run ruff check .               # 0 errors
 
 # Scaffold
-uv run calango new minha-api --path /tmp
-cd /tmp/minha-api
+uv run calango new my-api --path /tmp
+cd /tmp/my-api
 
-# Verificar artefatos
+# Verify artifacts
 ls app/ tests/ compose.yml Dockerfile CLAUDE.md .github/
 
-# Subir ambiente
+# Start environment
 docker compose up -d
 curl http://localhost:8000/health  # → {"status": "ok", "version": "0.1.0"}
 
-# Verificar headers de segurança
+# Verify security headers
 curl -I http://localhost:8000/health | grep -E "X-Content-Type|X-Frame|Strict-Transport"
 
-# Verificar projeto gerado
-uv run pytest          # fixtures carregam
-uv run ruff check .    # 0 erros
+# Verify generated project
+uv run pytest          # fixtures load
+uv run ruff check .    # 0 errors
 ```
 
 ---
 
-## Convenções imutáveis
+## Immutable conventions
 
-Definidas no `CLAUDE.md` — não negociáveis:
+Defined in `CLAUDE.md` — non-negotiable:
 
-- **Python mínimo:** 3.12
+- **Minimum Python:** 3.12
 - **Stack:** FastAPI + Pydantic v2 + SQLAlchemy 2 async + UV
-- **Arquitetura:** `routers → services → repositories → models` (sem saltar camadas)
-- **Schemas:** sufixos obrigatórios `Input`, `Output`, `Update`
-- **Testes:** nomes descritivos que documentam a regra de negócio
-- **Coverage:** gate de 80% no CI (falha abaixo disso)
-- **Commits:** Conventional Commits enforçados
-- **Segurança:** nunca expor stack trace em production, nunca hardcode secrets
+- **Architecture:** `routers → services → repositories → models` (no skipping layers)
+- **Schemas:** mandatory suffixes `Input`, `Output`, `Update`
+- **Tests:** descriptive names that document the business rule
+- **Coverage:** 80% gate in CI (fails below that)
+- **Commits:** Conventional Commits enforced
+- **Security:** never expose stack trace in production, never hardcode secrets

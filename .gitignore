@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+*.egg
+
+# UV / virtual envs
+.venv/
+venv/
+.uv/
+
+# Distribution
+build/
+dist/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+coverage.xml
+
+# Mypy / type checkers
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ty_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git worktrees (Claude Code)
+.claude/worktrees/
+.worktrees/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docs build
+site/
+
+# Alembic (generated)
+alembic/versions/*.py
+!alembic/versions/.gitkeep
