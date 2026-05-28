@@ -21,6 +21,8 @@ def _render_resource_templates(project_dir: Path, context: dict) -> list[str]:
     files = [
         ("resource/model.py.jinja", f"app/models/{snake}.py"),
         ("resource/schemas.py.jinja", f"app/schemas/{snake}.py"),
+        ("resource/repository.py.jinja", f"app/repositories/{snake}.py"),
+        ("resource/service.py.jinja", f"app/services/{snake}.py"),
     ]
     created = []
     for template_name, output_path in files:

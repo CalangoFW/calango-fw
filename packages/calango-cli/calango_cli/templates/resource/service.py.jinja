@@ -1,0 +1,40 @@
+from __future__ import annotations
+
+import uuid
+
+from calango.service import BaseService
+from app.repositories.{{ resource_snake }} import {{ resource_name }}Repository
+from app.schemas.{{ resource_snake }} import (
+    {{ resource_name }}Input,
+    {{ resource_name }}Output,
+    {{ resource_name }}Update,
+)
+
+
+class {{ resource_name }}Service(BaseService[{{ resource_name }}Repository]):
+    """Business logic for {{ resource_name }}.
+
+    All business rules live here. Never access the database directly.
+    Use self.repository for all data access.
+    """
+
+    async def create(self, data: {{ resource_name }}Input) -> {{ resource_name }}Output:
+        obj = await self.repository.create(data)
+        return {{ resource_name }}Output.model_validate(obj)
+
+    async def get(self, id: uuid.UUID) -> {{ resource_name }}Output | None:
+        obj = await self.repository.get(id)
+        if obj is None:
+            return None
+        return {{ resource_name }}Output.model_validate(obj)
+
+    async def list(self, *, skip: int = 0, limit: int = 100) -> list[{{ resource_name }}Output]:
+        objs = await self.repository.list(skip=skip, limit=limit)
+        return [{{ resource_name }}Output.model_validate(o) for o in objs]
+
+    async def update(self, id: uuid.UUID, data: {{ resource_name }}Update) -> {{ resource_name }}Output:
+        obj = await self.repository.update(id, data)
+        return {{ resource_name }}Output.model_validate(obj)
+
+    async def delete(self, id: uuid.UUID) -> None:
+        await self.repository.delete(id)

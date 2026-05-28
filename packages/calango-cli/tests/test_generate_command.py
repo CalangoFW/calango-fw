@@ -114,3 +114,47 @@ def test_generate_resource_compound_name_uses_snake_case_filename(tmp_path):
     result = runner.invoke(app, ["generate", "resource", "ProductItem", "--path", str(tmp_path)])
     assert result.exit_code == 0
     assert (tmp_path / "app" / "models" / "product_item.py").exists()
+
+
+def test_generate_resource_creates_repository_file(tmp_path):
+    """generate resource Order creates app/repositories/order.py."""
+    _make_project(tmp_path)
+    result = runner.invoke(app, ["generate", "resource", "Order", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+    assert (tmp_path / "app" / "repositories" / "order.py").exists()
+
+
+def test_generate_resource_repository_extends_base(tmp_path):
+    """app/repositories/order.py contains OrderRepository(BaseRepository[Order])."""
+    _make_project(tmp_path)
+    runner.invoke(app, ["generate", "resource", "Order", "--path", str(tmp_path)])
+    content = (tmp_path / "app" / "repositories" / "order.py").read_text()
+    assert "class OrderRepository(BaseRepository[Order]):" in content
+
+
+def test_generate_resource_creates_service_file(tmp_path):
+    """generate resource Order creates app/services/order.py."""
+    _make_project(tmp_path)
+    result = runner.invoke(app, ["generate", "resource", "Order", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+    assert (tmp_path / "app" / "services" / "order.py").exists()
+
+
+def test_generate_resource_service_extends_base(tmp_path):
+    """app/services/order.py contains OrderService(BaseService[OrderRepository])."""
+    _make_project(tmp_path)
+    runner.invoke(app, ["generate", "resource", "Order", "--path", str(tmp_path)])
+    content = (tmp_path / "app" / "services" / "order.py").read_text()
+    assert "class OrderService(BaseService[OrderRepository]):" in content
+
+
+def test_generate_resource_service_has_crud_methods(tmp_path):
+    """app/services/order.py contains create, get, list, update, delete methods."""
+    _make_project(tmp_path)
+    runner.invoke(app, ["generate", "resource", "Order", "--path", str(tmp_path)])
+    content = (tmp_path / "app" / "services" / "order.py").read_text()
+    assert "async def create(" in content
+    assert "async def get(" in content
+    assert "async def list(" in content
+    assert "async def update(" in content
+    assert "async def delete(" in content

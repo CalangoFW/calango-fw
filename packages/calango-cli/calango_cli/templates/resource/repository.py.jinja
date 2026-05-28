@@ -1,0 +1,13 @@
+from __future__ import annotations
+
+from calango.repository import BaseRepository
+from app.models.{{ resource_snake }} import {{ resource_name }}
+
+
+class {{ resource_name }}Repository(BaseRepository[{{ resource_name }}]):
+    """Data access layer for {{ resource_name }}.
+
+    Add custom query methods here. Never add business logic.
+    """
+
+    model = {{ resource_name }}
