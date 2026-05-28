@@ -194,3 +194,71 @@ def test_generate_resource_router_uses_correct_service(tmp_path):
     content = (tmp_path / "app" / "routers" / "order.py").read_text()
     assert "from app.services.order import OrderService" in content
     assert "OrderService" in content
+
+
+def test_generate_resource_creates_unit_test_file(tmp_path):
+    """generate resource Order creates tests/unit/test_order_service.py."""
+    _make_project(tmp_path)
+    result = runner.invoke(app, ["generate", "resource", "Order", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+    assert (tmp_path / "tests" / "unit" / "test_order_service.py").exists()
+
+
+def test_generate_resource_unit_test_has_five_cases(tmp_path):
+    """tests/unit/test_order_service.py has 5 test methods."""
+    _make_project(tmp_path)
+    runner.invoke(app, ["generate", "resource", "Order", "--path", str(tmp_path)])
+    content = (tmp_path / "tests" / "unit" / "test_order_service.py").read_text()
+    assert content.count("async def test_") == 5
+
+
+def test_generate_resource_creates_integration_test_file(tmp_path):
+    """generate resource Order creates tests/integration/test_order_router.py."""
+    _make_project(tmp_path)
+    result = runner.invoke(app, ["generate", "resource", "Order", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+    assert (tmp_path / "tests" / "integration" / "test_order_router.py").exists()
+
+
+def test_generate_resource_integration_test_has_security_cases(tmp_path):
+    """tests/integration/test_order_router.py has authentication and mass-assignment tests."""
+    _make_project(tmp_path)
+    runner.invoke(app, ["generate", "resource", "Order", "--path", str(tmp_path)])
+    content = (tmp_path / "tests" / "integration" / "test_order_router.py").read_text()
+    assert "test_create_order_requires_authentication" in content
+    assert "test_order_mass_assignment_is_blocked" in content
+
+
+def test_generate_resource_creates_factory_file(tmp_path):
+    """generate resource Order creates tests/factories/order_factory.py."""
+    _make_project(tmp_path)
+    result = runner.invoke(app, ["generate", "resource", "Order", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+    assert (tmp_path / "tests" / "factories" / "order_factory.py").exists()
+
+
+def test_generate_resource_factory_class_name_matches_resource(tmp_path):
+    """tests/factories/order_factory.py contains OrderFactory."""
+    _make_project(tmp_path)
+    runner.invoke(app, ["generate", "resource", "Order", "--path", str(tmp_path)])
+    content = (tmp_path / "tests" / "factories" / "order_factory.py").read_text()
+    assert "class OrderFactory(factory.Factory):" in content
+
+
+def test_generate_resource_generates_all_8_files(tmp_path):
+    """calango generate resource Order creates exactly 8 files."""
+    _make_project(tmp_path)
+    runner.invoke(app, ["generate", "resource", "Order", "--path", str(tmp_path)])
+    expected_files = [
+        tmp_path / "app" / "models" / "order.py",
+        tmp_path / "app" / "schemas" / "order.py",
+        tmp_path / "app" / "repositories" / "order.py",
+        tmp_path / "app" / "services" / "order.py",
+        tmp_path / "app" / "routers" / "order.py",
+        tmp_path / "tests" / "unit" / "test_order_service.py",
+        tmp_path / "tests" / "integration" / "test_order_router.py",
+        tmp_path / "tests" / "factories" / "order_factory.py",
+    ]
+    for f in expected_files:
+        assert f.exists(), f"Expected file not found: {f}"
+    assert len(expected_files) == 8
