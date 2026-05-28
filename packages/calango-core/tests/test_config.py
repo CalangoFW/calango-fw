@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 
 from calango.config import CalangoSettings, DatabaseSettings, RedisSettings, SecuritySettings
 
@@ -24,7 +25,7 @@ class TestRedisSettings:
 
 class TestSecuritySettings:
     def test_secret_key_e_obrigatorio(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             SecuritySettings()
 
     def test_algoritmo_padrao_rs256(self):

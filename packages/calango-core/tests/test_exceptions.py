@@ -1,4 +1,3 @@
-import pytest
 
 from calango.exceptions import (
     AuthenticationError,

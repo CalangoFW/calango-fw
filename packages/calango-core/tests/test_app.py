@@ -1,11 +1,10 @@
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from httpx import AsyncClient, ASGITransport
 
 from calango.config import CalangoSettings, SecuritySettings
 from calango.core.app import Calango
-from calango.exceptions import NotFoundError, AuthorizationError
+from calango.exceptions import AuthorizationError, NotFoundError
 
 
 @pytest.fixture
