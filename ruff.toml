@@ -25,6 +25,7 @@ ignore = [
 [lint.per-file-ignores]
 "tests/**/*.py" = ["S", "DTZ", "T20"]
 "**/tests/**/*.py" = ["S", "DTZ", "T20"]
+"**/commands/*.py" = ["B008"]  # Typer uses function calls in argument defaults
 
 [lint.isort]
 known-first-party = ["calango", "calango_cli"]
