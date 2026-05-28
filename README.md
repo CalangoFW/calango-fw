@@ -10,343 +10,335 @@
 
 [![Python](https://img.shields.io/badge/python-3.12+-4a9e3f?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-4a9e3f?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![License](https://img.shields.io/badge/license-MIT-5cb84f?style=flat-square)](LICENSE)
-[![Status](https://img.shields.io/badge/status-em%20desenvolvimento-c47f17?style=flat-square)]()
+[![License](https://img.shields.io/badge/license-PolyForm%20NonCommercial-5cb84f?style=flat-square)](LICENSE)
+[![Status](https://img.shields.io/badge/status-early%20development-c47f17?style=flat-square)]()
 
-*Convention over Configuration. TDD como padrão. IA como cidadã de primeira classe.*
+*Convention over Configuration. TDD as the default path. AI as a first-class citizen.*
 
 </div>
 
 ---
 
-## O que é o Calango?
+> **Early development.** The core package is functional. The CLI and plugins are planned — see [Roadmap](#roadmap).
 
-Calango é um meta-framework Python para desenvolvimento web inspirado no **Phoenix Framework** e no **Nest.js** — com a alma do **Rails** e o coração do **FastAPI**.
+---
 
-A ideia é simples: você não deveria gastar energia decidindo onde colocar cada arquivo, como configurar o CI, ou como estruturar seus testes. O Calango decide isso por você — e quando precisar sair da convenção, a saída é explícita e documentada.
+## What is Calango?
+
+Calango is a Python meta-framework for web development inspired by **Phoenix Framework** and **Nest.js** — with Rails' opinionated structure and FastAPI's async core.
+
+The premise: you shouldn't spend energy deciding where to put each file, how to configure CI, or how to structure your tests. Calango decides that for you — and when you need to deviate from the convention, the exit is explicit and documented.
 
 ```bash
+# Coming soon (CLI in development):
 pip install calango
-calango new meu-projeto
-cd meu-projeto && docker compose up
+calango new my-project
+cd my-project && docker compose up
 ```
 
-Em menos de dois minutos você tem um projeto com banco, cache, storage, CI/CD, CLAUDE.md para seus assistentes de IA, e testes prontos para escrever.
+In under two minutes you get a project with database, cache, storage, CI/CD, `CLAUDE.md` for your AI assistants, and tests ready to write.
 
 > *Corre não, corre sim — mas com testes!* 🦎
 
 ---
 
-## Por que o Calango?
+## Why Calango?
 
-### Para o desenvolvedor Python de 2025
+### For the Python developer of 2025
 
-Python dominou IA e ML. FastAPI dominou APIs. Mas nenhum framework Python trata **desenvolvimento assistido por IA** como princípio de design — nem faz **TDD o caminho de menor resistência**.
+Python dominates AI and ML. FastAPI dominates APIs. But no Python framework treats **AI-assisted development** as a design principle — or makes **TDD the path of least resistance**.
 
-O Calango foi desenhado do zero para o desenvolvedor que usa Claude Code, Cursor, Codex ou Antigravity no dia a dia:
+Calango was designed from scratch for developers who use Claude Code, Cursor, Codex, or Copilot daily:
 
-- **Estrutura previsível como contrato** — qualquer IA abre o projeto e sabe onde está cada coisa
-- **`CLAUDE.md` gerado e mantido automaticamente** — contexto sempre atualizado para seus assistentes
-- **Testes gerados junto com o código** — não como etapa separada
-- **Agentes IA como primitiva do framework** — não como plugin de terceiro grau
+- **Predictable structure as a contract** — any AI opens your project and knows where everything lives
+- **`CLAUDE.md` generated and auto-maintained** — always up-to-date context for your assistants
+- **Tests generated alongside code** — not as a separate step
+- **AI agents as a framework primitive** — not a third-party plugin bolted on
 
-### Convention over Configuration — mas flexível
+### Convention over Configuration — but flexible
 
 ```bash
-# Caminho feliz: zero configuração
-calango generate resource Pedido
-# Cria: model + schema + repository + service + router + testes + factory
+# Happy path: zero configuration
+calango generate resource Order
+# Creates: model + schema + repository + service + router + tests + factory
 
-# Precisa sair da convenção? É explícito:
-# Crie em outro lugar — o framework não te impede,
-# apenas não te guia automaticamente.
+# Need to deviate? It's explicit:
+# Create elsewhere — the framework won't block you,
+# it just won't guide you automatically.
 ```
 
-### Baterias incluídas, não forçadas
+### Batteries included, not forced
 
-Você ativa o que precisa, quando precisa:
+Activate what you need, when you need it:
 
 ```bash
 calango plugin add identity      # JWT, OAuth2, RBAC
 calango plugin add payments      # Stripe, Pix, webhooks
-calango plugin add agents        # Agentes IA com Agno
-calango plugin add multitenancy  # RLS no Postgres
+calango plugin add agents        # AI agents with Agno
+calango plugin add multitenancy  # Row-level security on Postgres
 calango plugin add search        # FTS, Typesense, Meilisearch
 ```
 
 ---
 
-## Funcionalidades principais
+## What works today
 
-### 🏗️ Scaffold completo em um comando
+`calango-core` is fully implemented with 54 tests and 97% coverage.
 
-```bash
-calango new minha-api --db=postgres --ci=github --agents
+### App factory with built-in security
 
-# Gera em ~45 segundos:
-# ✓ Estrutura de diretórios CoC
-# ✓ Dockerfile multi-stage (dev/ci/production)
-# ✓ Docker Compose com postgres, redis, minio, ollama
-# ✓ GitHub Actions CI (6 gates progressivos) + CD
-# ✓ PR template com Definition of Done
-# ✓ Issue templates
-# ✓ CLAUDE.md para Claude Code, .cursorrules para Cursor
-# ✓ Git inicializado com Conventional Commits enforçado
-# ✓ pyproject.toml com cobertura de 80% como gate
-# ✓ SECURITY.md e PERFORMANCE.md
+```python
+from calango import Calango, CalangoSettings
+from calango.config import SecuritySettings
+
+settings = CalangoSettings(
+    APP_NAME="My API",
+    security=SecuritySettings(SECRET_KEY="your-key"),
+)
+app = Calango(settings=settings)
+
+@app.get("/products/{id}")
+def get_product(id: str):
+    return {"id": id}
 ```
 
-### 🧪 TDD como caminho de menor resistência
+Every response automatically includes security headers — no configuration needed:
 
-```bash
-calango generate resource Pedido
-
-# Cria junto com o código:
-# tests/unit/test_pedido_service.py    — casos base já escritos
-# tests/integration/test_pedido_router.py — casos de segurança incluídos
-# tests/factories/pedido_factory.py    — factory-boy pronto
+```
+x-request-id: 3f2a1b4c-...        ← unique UUID per request
+x-calango-version: 0.1.0-dev
+x-content-type-options: nosniff
+x-frame-options: DENY
+strict-transport-security: max-age=31536000
 ```
 
-O pre-commit bloqueia commit se existe resource sem teste correspondente.
-O CI falha se cobertura < 80%.
+### Structured error responses
 
-### 🤖 IA como cidadã de primeira classe
+```python
+from calango.exceptions import NotFoundError, AuthorizationError, ConflictError
+
+@app.get("/products/{id}")
+def get_product(id: str):
+    raise NotFoundError("Product not found")
+    # → HTTP 404: {"error": "not_found", "message": "Product not found", "request_id": "..."}
+
+@app.post("/users")
+def create_user(email: str):
+    raise ConflictError("Email already registered")
+    # → HTTP 409
+
+# Unhandled RuntimeError or any exception → 500 with no stack trace exposed
+```
+
+Nine exception types: `NotFoundError`, `ValidationError`, `AuthenticationError`, `AuthorizationError`, `ConflictError`, `RateLimitError`, `ServiceUnavailableError`, `ConfigurationError` — all producing consistent JSON.
+
+### Pydantic base models
+
+```python
+from calango import CalangoModel, PaginatedResponse, OrderDirection
+
+class ProductOutput(CalangoModel):   # from_attributes=True — ORM-ready
+    id: int
+    name: str
+    price: float
+
+@app.get("/products")
+def list_products() -> PaginatedResponse[ProductOutput]:
+    return PaginatedResponse(
+        items=[ProductOutput(id=1, name="T-Shirt", price=49.90)],
+        total=1, page=1, page_size=10  # pages computed automatically
+    )
+```
+
+### Settings from environment
+
+```python
+# All sub-settings configurable via env vars or .env file
+settings = CalangoSettings(
+    APP_NAME="My API",
+    security=SecuritySettings(SECRET_KEY="..."),
+    # database, redis sub-settings auto-populated from env
+)
+```
+
+```bash
+APP_NAME="Store API" SECURITY__SECRET_KEY="key" uv run uvicorn app:app
+```
+
+---
+
+## Planned features
+
+### 🏗️ Full scaffold in one command
+
+```bash
+calango new my-api --db=postgres --ci=github --agents
+
+# Generates in ~45 seconds:
+# ✓ CoC directory structure
+# ✓ Multi-stage Dockerfile (dev/ci/production)
+# ✓ Docker Compose with postgres, redis, minio, ollama
+# ✓ GitHub Actions CI (6 progressive gates) + CD
+# ✓ PR template with Definition of Done
+# ✓ CLAUDE.md for Claude Code, .cursorrules for Cursor
+# ✓ Git initialized with Conventional Commits enforced
+# ✓ pyproject.toml with 80% coverage gate
+```
+
+### 🧪 TDD as the path of least resistance
+
+```bash
+calango generate resource Order
+
+# Creates alongside the code:
+# tests/unit/test_order_service.py       — base cases pre-written
+# tests/integration/test_order_router.py — security cases included
+# tests/factories/order_factory.py       — factory-boy ready
+```
+
+Pre-commit blocks commits if a resource exists without its corresponding test.
+CI fails if coverage drops below 80%.
+
+### 🤖 AI as a first-class citizen
 
 ```python
 from calango.agents import AgentRouter
 
 router = AgentRouter(prefix="/agents")
 
-@router.agent("/suporte", streaming=True, guardrails=True)
-async def agente_suporte():
-    """Agente de suporte com acesso aos dados reais da conta."""
+@router.agent("/support", streaming=True, guardrails=True)
+async def support_agent():
+    """Support agent with access to real account data."""
 
-@router.tool(permissions=["pedidos:read"])
-async def buscar_pedidos(context: AgentContext) -> list[PedidoOutput]:
-    """Tool sempre scoped ao usuário — sem BOLA por design."""
-    return await PedidoRepository.list_by_user(user_id=context.user_id)
+@router.tool(permissions=["orders:read"])
+async def get_orders(context: AgentContext) -> list[OrderOutput]:
+    """Tool always scoped to the authenticated user — no BOLA by design."""
+    return await OrderRepository.list_by_user(user_id=context.user_id)
 
 @router.tool(requires_approval=True)
-async def solicitar_reembolso(context: AgentContext, pedido_id: str, motivo: str):
-    """Human-in-the-loop: pausa, notifica, aguarda aprovação humana."""
-    ...
+async def request_refund(context: AgentContext, order_id: str, reason: str):
+    """Human-in-the-loop: pauses, notifies, waits for human approval."""
 ```
 
-**Engine padrão: [Agno](https://agno.com)** — ~2µs por agente, 23+ providers de LLM, MCP nativo.  
-**Em desenvolvimento:** Ollama local no Docker Compose. **Em produção:** Anthropic, OpenAI, Gemini — uma variável de ambiente.
+**Default engine: [Agno](https://agno.com)** — ~2µs per agent, 23+ LLM providers, native MCP.
 
-### 🔒 Segurança OWASP por design
+### 🔒 OWASP security by design
 
 ```python
-# Secure by default — todos os endpoints exigem auth
-@router.get("/pedidos")
-async def listar(current_user: User = Depends(get_current_user)):
+# Secure by default — all endpoints require auth
+@router.get("/orders")
+async def list_orders(current_user: User = Depends(get_current_user)):
     ...
 
-# Exceção explícita e visível no código
+# Explicit public exception — visible in the code
 @router.get("/status")
 @public
 async def health_check():
     ...
 ```
 
-- **OWASP Top 10:2025** — A01 a A10 tratados no design do framework
-- **OWASP API Security:2023** — BOLA, mass assignment, rate limiting por padrão
+- **OWASP Top 10:2025** — A01 through A10 addressed in framework design
+- **OWASP API Security:2023** — BOLA, mass assignment, rate limiting by default
 - **OWASP LLM:2025** — prompt injection, excessive agency, unbounded consumption
-- **`calango check:security`** — auditoria pré-deploy com score e findings acionáveis
-- **Casos de segurança gerados** — todo resource tem testes 401, 403 e BOLA por padrão
+- **Security test cases generated** — every resource gets 401, 403, and BOLA tests by default
 
-### ⚡ Performance com detecção proativa
+### ⚡ Proactive performance detection
 
 ```bash
-# Durante desenvolvimento:
+# During development:
 X-Calango-Query-Count: 47
-X-Calango-N1-Warning: PedidoRepository (43 queries similares) ← aviso automático
+X-Calango-N1-Warning: OrderRepository (43 similar queries) ← automatic warning
 
-# Sugestão automática de índices:
+# Automatic index suggestion:
 calango db suggest-indexes
 
-  #1 ALTA PRIORIDADE: pedidos.status — 847 queries/dia, redução de 97%
-  Gerar migration? [S/n]
+  #1 HIGH PRIORITY: orders.status — 847 queries/day, 97% reduction estimated
+  Generate migration? [Y/n]
 ```
-
-- **Watchdog de event loop** — detecta código bloqueante em corrotinas
-- **Regras Ruff customizadas** — detectam `requests` dentro de `async def` em lint time
-- **Benchmark no CI** — regressão de performance bloqueia o PR
 
 ---
 
 ## Stack
 
-| | Tecnologia | Por quê |
+| Layer | Technology | Why |
 |---|---|---|
-| **HTTP** | FastAPI | Async nativo, OpenAPI automático, padrão de mercado |
-| **Validação** | Pydantic v2 | Performance, tipagem forte, base de tudo |
-| **ORM** | SQLAlchemy 2 async | Async nativo, padrão repository limpo |
-| **Migrations** | Alembic | Auto-geração, reversível |
-| **Cache/Queue** | Redis + ARQ | Async nativo, leve |
-| **Pacotes** | UV | O mais rápido, workspace, lockfile |
-| **Lint** | Ruff | Substitui flake8 + isort + black |
-| **Types** | TY | Moderno, integrado ao ecossistema Ruff |
-| **Agentes** | Agno | FastAPI nativo, MCP, 23+ providers |
-| **Infra** | Docker + Compose | Dev idêntico ao CI |
+| **HTTP** | FastAPI | Async-native, automatic OpenAPI, industry standard |
+| **Validation** | Pydantic v2 | Performance, strong typing, foundation of everything |
+| **ORM** | SQLAlchemy 2 async | Async-native, clean repository pattern |
+| **Migrations** | Alembic | Auto-generation, reversible |
+| **Cache/Queue** | Redis + ARQ | Async-native, lightweight |
+| **Packages** | UV | Fastest resolver, workspace, lockfile |
+| **Lint** | Ruff | Replaces flake8 + isort + black |
+| **Types** | TY | Modern, integrated with Ruff ecosystem |
+| **AI Agents** | Agno | FastAPI-native, MCP, 23+ providers |
+| **Infra** | Docker + Compose | Dev identical to CI |
 
 ---
 
-## Plugins disponíveis
+## Plugins
 
 ### Core SaaS
-| Plugin | O que faz |
+| Plugin | What it does |
 |---|---|
-| `calango-identity` | JWT RS256, refresh rotation, OAuth2 social, RBAC, Teams, convites |
-| `calango-multitenancy` | Row-level (RLS PG padrão), schema-level, db-level |
-| `calango-payments` | Stripe + MercadoPago/Pix, webhooks com verificação de assinatura |
-| `calango-plans` | `@plan_limit` decorator, features por plano |
+| `calango-identity` | JWT RS256, refresh rotation, OAuth2, RBAC, Teams, invites |
+| `calango-multitenancy` | Row-level (Postgres RLS default), schema-level, db-level |
+| `calango-payments` | Stripe + MercadoPago/Pix, webhooks with signature verification |
+| `calango-plans` | `@plan_limit` decorator, per-plan feature gates |
 
-### Produtividade
-| Plugin | O que faz |
+### Productivity
+| Plugin | What it does |
 |---|---|
-| `calango-search` | PG FTS (padrão), Typesense, Meilisearch — mesma interface |
-| `calango-notifications` | Email, push, SMS, Slack, webhook outbound, inbox in-app |
-| `calango-admin` | SQLAdmin + Admin Copilot (NL2SQL via agente) |
-| `calango-media` | Upload S3/GCS/MinIO, conversões async (WebP, AVIF, thumbs) |
-| `calango-background` | ARQ (padrão), Celery, DLQ automática, retry com backoff |
+| `calango-search` | PG FTS (default), Typesense, Meilisearch — same interface |
+| `calango-notifications` | Email, push, SMS, Slack, outbound webhook, in-app inbox |
+| `calango-admin` | SQLAdmin + Admin Copilot (NL2SQL via agent) |
+| `calango-media` | S3/GCS/MinIO upload, async conversions (WebP, AVIF, thumbnails) |
+| `calango-background` | ARQ (default), Celery, automatic DLQ, retry with backoff |
 
-### IA e Agentes
-| Plugin | O que faz |
+### AI and Agents
+| Plugin | What it does |
 |---|---|
 | `calango-agents` | Agno engine, AgentRouter, Tool Registry, MCP Server |
-| `calango-knowledge` | Knowledge Base com pgvector, RAG sobre dados da aplicação |
-| `calango-guardrails` | Filtro PII, moderação, detecção de prompt injection |
-| `calango-cost-control` | Budget de tokens por usuário/tenant/plano |
-| `calango-evals` | deepeval + ragas no CI, gate de qualidade de respostas |
+| `calango-knowledge` | Knowledge Base with pgvector, RAG over application data |
+| `calango-guardrails` | PII filter, moderation, prompt injection detection |
+| `calango-cost-control` | Token budget per user/tenant/plan |
+| `calango-evals` | deepeval + ragas in CI, response quality gate |
 
-### Mixins de model (inspirados no Rails/Laravel)
-| Plugin | O que faz |
+### Model mixins
+| Plugin | What it does |
 |---|---|
-| `soft-delete` | `deleted_at`, queries automáticas, restore |
-| `audit-log` | Histórico de mudanças via SQLAlchemy event listeners |
-| `sluggable` | Slug único com histórico de redirects (friendly_id style) |
-| `sortable` | Campo `position` gerenciado, reordenação atômica |
-| `nested-tree` | Closure table ou LTREE do Postgres, sem N+1 |
-| `taggable` | Tags polimórficas com namespaces |
+| `soft-delete` | `deleted_at`, automatic query scoping, restore |
+| `audit-log` | Change history via SQLAlchemy event listeners |
+| `sluggable` | Unique slug with redirect history (friendly_id style) |
+| `sortable` | Managed `position` field, atomic reordering |
+| `nested-tree` | Closure table or Postgres LTREE, no N+1 |
+| `taggable` | Polymorphic tags with namespaces |
 
-### Resiliência
-| Plugin | O que faz |
+### Resilience
+| Plugin | What it does |
 |---|---|
-| `calango-idempotency` | Middleware `Idempotency-Key`, essencial para pagamentos |
-| `calango-health` | `/health` com checks plugáveis, formato Kubernetes |
+| `calango-idempotency` | `Idempotency-Key` middleware, essential for payments |
+| `calango-health` | `/health` with pluggable checks, Kubernetes format |
 | `calango-rate-limit` | `@throttle("100/hour")`, sliding window Redis |
-| `calango-feature-flags` | Flag por usuário/grupo/% rollout, backend Redis ou PG |
+| `calango-feature-flags` | Per-user/group/% rollout flags, Redis or PG backend |
 
 ---
 
-## Quick start
-
-### Pré-requisitos
-
-- Python 3.12+
-- Docker e Docker Compose
-- UV (`pip install uv`)
-
-### Criar um projeto
-
-```bash
-# Instalar o Calango
-pip install calango
-
-# Criar projeto
-calango new minha-api
-
-# Entrar no diretório e configurar
-cd minha-api
-cp .env.example .env
-# Edite .env com suas configurações
-
-# Subir o ambiente
-docker compose up
-
-# Em outro terminal: aplicar migrations e rodar testes
-calango db migrate
-calango test
-```
-
-### Gerar seu primeiro resource
-
-```bash
-calango generate resource Produto
-
-# Criado automaticamente:
-# app/models/produto.py
-# app/schemas/produto.py        (ProdutoInput, ProdutoOutput, ProdutoUpdate)
-# app/repositories/produto.py
-# app/services/produto.py
-# app/routers/produto.py
-# tests/unit/test_produto_service.py      (casos base)
-# tests/integration/test_produto_router.py (casos de segurança)
-# tests/factories/produto_factory.py
-```
-
-### Adicionar autenticação
-
-```bash
-calango plugin add identity
-
-# Registrado automaticamente:
-# POST /api/v1/auth/login
-# POST /api/v1/auth/refresh
-# POST /api/v1/auth/register
-# POST /api/v1/auth/forgot-password
-# Todos os endpoints protegidos por padrão
-```
-
-### Adicionar um agente de IA
-
-```bash
-calango plugin add agents
-calango generate agent Suporte
-
-# Cria:
-# app/agents/suporte_agent.py
-# tests/agents/test_suporte_agent.py
-# MCP Server em /mcp — conecte seu Claude Code
-```
-
----
-
-## Comparação
-
-|  | Calango | FastAPI puro | Django | Flask |
-|---|---|---|---|---|
-| CoC | ✅ | ❌ | ✅ | ❌ |
-| Async nativo | ✅ | ✅ | Parcial | Parcial |
-| TDD como padrão | ✅ | ❌ | Parcial | ❌ |
-| AI-assisted ready | ✅ | ❌ | ❌ | ❌ |
-| Agentes IA | ✅ | ❌ | ❌ | ❌ |
-| MCP Server | ✅ | ❌ | ❌ | ❌ |
-| Scaffold completo | ✅ | ❌ | Parcial | ❌ |
-| CI/CD gerado | ✅ | ❌ | ❌ | ❌ |
-| OWASP por design | ✅ | ❌ | Parcial | ❌ |
-| Índices automáticos | ✅ | ❌ | ❌ | ❌ |
-
----
-
-## Estrutura de projeto
+## Generated project structure
 
 ```
-minha-api/
+my-project/
 ├── app/
-│   ├── models/         # SQLAlchemy — estrutura, sem lógica
+│   ├── models/         # SQLAlchemy — structure, no business logic
 │   ├── schemas/        # Pydantic — Input, Output, Update
-│   ├── repositories/   # Acesso ao banco — só queries
-│   ├── services/       # Regras de negócio — só aqui
-│   ├── routers/        # HTTP — validação e delegação
-│   └── agents/         # Agentes e tools (se plugin ativo)
+│   ├── repositories/   # Database access — queries only
+│   ├── services/       # Business logic — only here
+│   ├── routers/        # HTTP — validation and delegation
+│   └── agents/         # Agents and tools (if plugin active)
 ├── tests/
-│   ├── unit/           # Services e schemas — sem banco
-│   ├── integration/    # Routers com banco real
+│   ├── unit/           # Services and schemas — no database
+│   ├── integration/    # Routers with real database
 │   └── factories/      # factory-boy
-├── CLAUDE.md           # Contexto para Claude Code — auto-mantido
+├── CLAUDE.md           # Context for Claude Code — auto-maintained
 ├── compose.yml         # postgres + redis + minio + ollama
 ├── Dockerfile          # dev → ci → production
 └── .github/workflows/  # CI (6 gates) + CD (staging → prod)
@@ -354,57 +346,79 @@ minha-api/
 
 ---
 
-## Identidade
+## Comparison
 
-O **Calango** (*Ameiva ameiva*) é o lagarto mais ágil do sertão brasileiro. Rápido, esperto, difícil de pegar — e sempre com os olhos abertos para o que vem pela frente.
-
-Cores: verde-lagarto `#3d8a34` · âmbar-sol `#c47f17` · terra-sertão `#2c2416`
+|  | Calango | FastAPI alone | Django | Flask |
+|---|---|---|---|---|
+| Convention over Config | ✅ | ❌ | ✅ | ❌ |
+| Async-native | ✅ | ✅ | Partial | Partial |
+| TDD as default path | ✅ | ❌ | Partial | ❌ |
+| AI-assisted ready | ✅ | ❌ | ❌ | ❌ |
+| AI agents built-in | ✅ | ❌ | ❌ | ❌ |
+| MCP Server | ✅ | ❌ | ❌ | ❌ |
+| Full scaffold | ✅ | ❌ | Partial | ❌ |
+| CI/CD generated | ✅ | ❌ | ❌ | ❌ |
+| OWASP by design | ✅ | ❌ | Partial | ❌ |
+| Automatic index hints | ✅ | ❌ | ❌ | ❌ |
 
 ---
 
-## Status do projeto
+## Roadmap
 
-🚧 **Em desenvolvimento ativo** — versão 0.1.0
+| Milestone | What it delivers | Status |
+|---|---|---|
+| **M1** "calango new works" | Core + CLI scaffold | 🟡 In progress |
+| **M2** "generate resource" | Full CRUD scaffold with real database | 🔴 Planned |
+| **M3** "minimal SaaS" | JWT auth + RBAC + protected endpoints | 🔴 Planned |
+| **M4** "SaaS core" | Multi-tenancy (RLS) + payments (Stripe + Pix) | 🔴 Planned |
+| **M5** "AI layer" | `calango generate agent` → running agent with MCP | 🔴 Planned |
+| **M6** "Ecosystem" | All plugins + published MkDocs docs | 🔴 Planned |
 
-| Componente | Status |
+See [ROADMAP.md](ROADMAP.md) for the full breakdown.
+
+### Component status
+
+| Component | Status |
 |---|---|
-| `calango-core` | 🟡 Em desenvolvimento |
-| `calango-cli` (new) | 🟡 Em desenvolvimento |
-| `calango-cli` (generate) | 🔴 Planejado |
-| `calango-identity` | 🔴 Planejado |
-| `calango-agents` | 🔴 Planejado |
-| `calango-payments` | 🔴 Planejado |
-| Documentação | 🔴 Planejada |
+| `calango-core` — exceptions, settings, types | ✅ Done (21 tests) |
+| `calango-core` — app factory, middleware, handlers | ✅ Done (10 tests) |
+| `calango-cli` — `calango new` | 🟡 Next |
+| `calango-core` — `BaseRepository` + `BaseService` | 🔴 Planned |
+| `calango-cli` — `calango generate resource` | 🔴 Planned |
+| `calango-identity` | 🔴 Planned |
+| `calango-agents` | 🔴 Planned |
+| `calango-payments` | 🔴 Planned |
+| Documentation | 🔴 Planned |
 
 ---
 
-## Contribuindo
+## Contributing
 
-O Calango está nos estágios iniciais. Se você quer contribuir:
+Calango is in early stages. If you want to contribute:
 
-1. Leia o `CLAUDE.md` — é o briefing completo do projeto
-2. Leia o `docs/spec.md` — especificação detalhada de cada componente
-3. Abra uma issue antes de começar qualquer PR grande
-4. Siga as convenções do projeto (Conventional Commits, CoC)
+1. Read `CLAUDE.md` — it's the full project briefing
+2. Read `ROADMAP.md` — phased implementation plan
+3. Open an issue before starting any large PR
+4. Follow project conventions (Conventional Commits, CoC architecture)
 
 ```bash
 git clone https://github.com/calango-framework/calango
 cd calango
 uv sync
-calango test
+uv run pytest packages/
 ```
 
 ---
 
-## Licença
+## License
 
-MIT © Calango Contributors
+[PolyForm NonCommercial 1.0.0](LICENSE) — fork and modify freely with attribution, no commercial use.
 
 ---
 
 <div align="center">
 
-**Feito com 🦎 e ☕ no Brasil**
+**Made with 🦎 and ☕ in Brazil**
 
 *Corre não, corre sim — mas com testes!*
 
