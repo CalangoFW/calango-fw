@@ -85,3 +85,42 @@ def test_new_creates_tests_init(tmp_path):
     """calango new creates tests/__init__.py."""
     runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
     assert (tmp_path / "my-api" / "tests" / "__init__.py").is_file()
+
+
+def test_new_creates_tests_conftest(tmp_path):
+    """calango new creates tests/conftest.py with db and client fixtures."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert (tmp_path / "my-api" / "tests" / "conftest.py").is_file()
+
+
+def test_new_conftest_has_db_fixture(tmp_path):
+    """tests/conftest.py contains the db fixture."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    content = (tmp_path / "my-api" / "tests" / "conftest.py").read_text()
+    assert "async def db()" in content
+
+
+def test_new_conftest_has_client_fixture(tmp_path):
+    """tests/conftest.py contains the async client fixture."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    content = (tmp_path / "my-api" / "tests" / "conftest.py").read_text()
+    assert "async def client(" in content
+
+
+def test_new_creates_alembic_env(tmp_path):
+    """calango new creates alembic/env.py."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert (tmp_path / "my-api" / "alembic" / "env.py").is_file()
+
+
+def test_new_creates_alembic_ini(tmp_path):
+    """calango new creates alembic.ini."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert (tmp_path / "my-api" / "alembic.ini").is_file()
+
+
+def test_new_alembic_ini_has_script_location(tmp_path):
+    """alembic.ini has script_location = alembic."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    content = (tmp_path / "my-api" / "alembic.ini").read_text()
+    assert "script_location = alembic" in content

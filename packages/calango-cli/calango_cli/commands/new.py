@@ -12,6 +12,9 @@ _TEMPLATE_FILES = [
     ("app/core/__init__.py.jinja", "app/core/__init__.py"),
     ("app/core/config.py.jinja", "app/core/config.py"),
     ("tests/__init__.py.jinja", "tests/__init__.py"),
+    ("tests/conftest.py.jinja", "tests/conftest.py"),
+    ("alembic/env.py.jinja", "alembic/env.py"),
+    ("alembic.ini.jinja", "alembic.ini"),
 ]
 
 

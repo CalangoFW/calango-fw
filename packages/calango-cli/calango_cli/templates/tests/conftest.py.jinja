@@ -1,0 +1,30 @@
+import pytest
+import pytest_asyncio
+from httpx import AsyncClient, ASGITransport
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from app.main import app
+from app.core.config import Settings
+
+settings = Settings()
+
+
+@pytest_asyncio.fixture
+async def db() -> AsyncSession:
+    """Isolated database session with automatic rollback per test."""
+    engine = create_async_engine(settings.database.URL, echo=False)
+    async_session = async_sessionmaker(engine, expire_on_commit=False)
+    async with async_session() as session:
+        async with session.begin():
+            yield session
+            await session.rollback()
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def client(db: AsyncSession) -> AsyncClient:
+    """Async HTTP client with isolated database."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as ac:
+        yield ac
