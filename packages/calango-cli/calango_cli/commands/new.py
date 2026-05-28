@@ -15,6 +15,8 @@ _TEMPLATE_FILES = [
     ("tests/conftest.py.jinja", "tests/conftest.py"),
     ("alembic/env.py.jinja", "alembic/env.py"),
     ("alembic.ini.jinja", "alembic.ini"),
+    ("Dockerfile.jinja", "Dockerfile"),
+    ("compose.yml.jinja", "compose.yml"),
 ]
 
 

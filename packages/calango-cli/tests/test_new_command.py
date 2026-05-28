@@ -124,3 +124,53 @@ def test_new_alembic_ini_has_script_location(tmp_path):
     runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
     content = (tmp_path / "my-api" / "alembic.ini").read_text()
     assert "script_location = alembic" in content
+
+
+def test_new_creates_dockerfile(tmp_path):
+    """calango new creates a Dockerfile."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert (tmp_path / "my-api" / "Dockerfile").is_file()
+
+
+def test_new_dockerfile_has_four_stages(tmp_path):
+    """Dockerfile has base, development, ci, and production stages."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    content = (tmp_path / "my-api" / "Dockerfile").read_text()
+    assert "AS base" in content
+    assert "AS development" in content
+    assert "AS ci" in content
+    assert "AS production" in content
+
+
+def test_new_creates_compose_yml(tmp_path):
+    """calango new creates compose.yml."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert (tmp_path / "my-api" / "compose.yml").is_file()
+
+
+def test_new_compose_has_postgres_service(tmp_path):
+    """compose.yml contains postgres service."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    content = (tmp_path / "my-api" / "compose.yml").read_text()
+    assert "postgres:" in content
+
+
+def test_new_compose_has_redis_service(tmp_path):
+    """compose.yml contains redis service."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    content = (tmp_path / "my-api" / "compose.yml").read_text()
+    assert "redis:" in content
+
+
+def test_new_compose_has_minio_service(tmp_path):
+    """compose.yml contains minio service."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    content = (tmp_path / "my-api" / "compose.yml").read_text()
+    assert "minio:" in content
+
+
+def test_new_compose_postgres_uses_project_name(tmp_path):
+    """compose.yml postgres DB uses the project name."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    content = (tmp_path / "my-api" / "compose.yml").read_text()
+    assert "my-api" in content
