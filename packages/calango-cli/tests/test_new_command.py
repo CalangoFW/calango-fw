@@ -51,3 +51,37 @@ def test_new_default_options_are_valid(tmp_path):
     result = runner.invoke(app, ["new", "simple-project", "--path", str(tmp_path)])
     assert result.exit_code == 0
     assert (tmp_path / "simple-project").is_dir()
+
+
+def test_new_creates_app_init(tmp_path):
+    """calango new creates app/__init__.py."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert (tmp_path / "my-api" / "app" / "__init__.py").is_file()
+
+
+def test_new_creates_app_main(tmp_path):
+    """calango new creates app/main.py with Calango import."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    content = (tmp_path / "my-api" / "app" / "main.py").read_text()
+    assert "from calango import Calango" in content
+
+
+def test_new_creates_app_core_config(tmp_path):
+    """calango new creates app/core/config.py with Settings class."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert (tmp_path / "my-api" / "app" / "core" / "config.py").is_file()
+    content = (tmp_path / "my-api" / "app" / "core" / "config.py").read_text()
+    assert "class Settings(CalangoSettings)" in content
+
+
+def test_new_config_contains_project_name(tmp_path):
+    """app/core/config.py contains the project name in APP_NAME."""
+    runner.invoke(app, ["new", "my-cool-api", "--path", str(tmp_path)])
+    content = (tmp_path / "my-cool-api" / "app" / "core" / "config.py").read_text()
+    assert "my-cool-api" in content
+
+
+def test_new_creates_tests_init(tmp_path):
+    """calango new creates tests/__init__.py."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert (tmp_path / "my-api" / "tests" / "__init__.py").is_file()
