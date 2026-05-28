@@ -2,6 +2,7 @@ __version__ = "0.1.0-dev"
 
 from calango.config import CalangoSettings
 from calango.core.app import Calango
+from calango.core.database import configure_engine, get_db
 from calango.exceptions import (
     AuthenticationError,
     AuthorizationError,
@@ -13,11 +14,13 @@ from calango.exceptions import (
     ServiceUnavailableError,
     ValidationError,
 )
+from calango.repository import BaseRepository
 from calango.types import CalangoModel, OrderDirection, PaginatedResponse
 
 __all__ = [
     "AuthenticationError",
     "AuthorizationError",
+    "BaseRepository",
     "Calango",
     "CalangoException",
     "CalangoModel",
@@ -31,4 +34,6 @@ __all__ = [
     "ServiceUnavailableError",
     "ValidationError",
     "__version__",
+    "configure_engine",
+    "get_db",
 ]

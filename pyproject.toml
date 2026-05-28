@@ -10,6 +10,7 @@ dev = [
     "ruff>=0.8",
     "ty>=0.0.1a1",
     "pytest-cov>=7.1.0",
+    "aiosqlite>=0.22.1",
 ]
 
 [tool.pytest.ini_options]
