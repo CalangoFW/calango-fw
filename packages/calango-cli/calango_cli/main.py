@@ -1,9 +1,11 @@
 import typer
 
+from calango_cli.commands.generate import app as generate_app
 from calango_cli.commands.new import new
 
 app = typer.Typer(name="calango", help="The fast, friendly Python web framework CLI.")
 app.command("new")(new)
+app.add_typer(generate_app, name="generate")
 
 
 @app.callback(invoke_without_command=True)

@@ -1,0 +1,36 @@
+import pytest
+
+from app.services.{{ resource_snake }} import {{ resource_name }}Service
+
+
+class Test{{ resource_name }}Service:
+    """Unit tests for {{ resource_name }}Service.
+
+    Each test documents a business rule. Use descriptive names.
+    Run with: uv run pytest tests/unit/test_{{ resource_snake }}_service.py -v
+    """
+
+    async def test_create_{{ resource_snake }}_with_valid_data_should_persist(self, db):
+        """{{ resource_name }} created with valid data should be persisted."""
+        # TODO: implement
+        ...
+
+    async def test_create_{{ resource_snake }}_without_required_field_should_raise(self, db):
+        """{{ resource_name }} without required field should raise ValidationError."""
+        # TODO: implement
+        ...
+
+    async def test_get_{{ resource_snake }}_by_id_should_return_record(self, db):
+        """Get {{ resource_name }} by existing id should return the record."""
+        # TODO: implement
+        ...
+
+    async def test_get_{{ resource_snake }}_with_nonexistent_id_should_return_none(self, db):
+        """Get {{ resource_name }} with nonexistent id should return None."""
+        # TODO: implement
+        ...
+
+    async def test_delete_{{ resource_snake }}_should_remove_from_database(self, db):
+        """Delete {{ resource_name }} should make it inaccessible."""
+        # TODO: implement
+        ...
