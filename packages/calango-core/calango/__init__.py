@@ -15,12 +15,15 @@ from calango.exceptions import (
     ValidationError,
 )
 from calango.repository import BaseRepository
+from calango.service import BaseService
+from calango.testing import test_db_session
 from calango.types import CalangoModel, OrderDirection, PaginatedResponse
 
 __all__ = [
     "AuthenticationError",
     "AuthorizationError",
     "BaseRepository",
+    "BaseService",
     "Calango",
     "CalangoException",
     "CalangoModel",
@@ -36,4 +39,5 @@ __all__ = [
     "__version__",
     "configure_engine",
     "get_db",
+    "test_db_session",
 ]

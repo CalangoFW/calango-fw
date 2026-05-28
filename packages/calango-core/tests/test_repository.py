@@ -136,3 +136,56 @@ class TestBaseRepository:
         assert result is not None
         assert result.id == created.id
         assert result.name == "Lockable"
+
+
+# ---------------------------------------------------------------------------
+# test_db_session tests
+# ---------------------------------------------------------------------------
+
+
+class TestTestDbSession:
+    async def test_test_db_session_yields_async_session(self) -> None:
+        """test_db_session yields an AsyncSession."""
+        from calango.testing import test_db_session
+
+        async with test_db_session() as session:
+            assert isinstance(session, AsyncSession)
+
+    async def test_test_db_session_creates_tables_when_base_provided(self) -> None:
+        """test_db_session creates tables when base is provided."""
+        from calango.testing import test_db_session
+
+        async with test_db_session(base=Base) as session:
+            # Verify that tables exist by attempting to query them
+            from sqlalchemy import select
+
+            # If the table doesn't exist, this will raise an error
+            result = await session.execute(select(Item))
+            items = result.scalars().all()
+            assert isinstance(items, list)
+
+    async def test_test_db_session_allows_crud_operations(self) -> None:
+        """test_db_session yields a working session for CRUD."""
+        from calango.testing import test_db_session
+
+        async with test_db_session(base=Base) as session:
+            repo = ItemRepository(session)
+            # Create
+            item_id = uuid4()
+            created = await repo.create(ItemCreate(id=item_id, name="TestItem"))
+            assert created.id == item_id
+            assert created.name == "TestItem"
+
+            # Read
+            fetched = await repo.get(item_id)
+            assert fetched is not None
+            assert fetched.name == "TestItem"
+
+            # Update
+            updated = await repo.update(item_id, ItemUpdate(name="Updated"))
+            assert updated.name == "Updated"
+
+            # Delete
+            await repo.delete(item_id)
+            deleted = await repo.get(item_id)
+            assert deleted is None
