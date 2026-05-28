@@ -14,6 +14,7 @@ _TEMPLATE_FILES = [
     ("tests/__init__.py.jinja", "tests/__init__.py"),
     ("tests/conftest.py.jinja", "tests/conftest.py"),
     ("alembic/env.py.jinja", "alembic/env.py"),
+    ("alembic/versions/.gitkeep.jinja", "alembic/versions/.gitkeep"),
     ("alembic.ini.jinja", "alembic.ini"),
     ("Dockerfile.jinja", "Dockerfile"),
     ("compose.yml.jinja", "compose.yml"),
@@ -55,6 +56,22 @@ def new(
     project_dir = path / name
     if project_dir.exists():
         console.print(f"[red]Error:[/red] Directory '{project_dir}' already exists.")
+        raise typer.Exit(1)
+
+    # Only postgres and github are implemented in Phase 2
+    supported_db = {"postgres"}
+    supported_ci = {"github"}
+
+    if db not in supported_db:
+        console.print(
+            f"[red]Error:[/red] --db={db!r} is not supported. Supported: {', '.join(supported_db)}"
+        )
+        raise typer.Exit(1)
+
+    if ci not in supported_ci:
+        console.print(
+            f"[red]Error:[/red] --ci={ci!r} is not supported. Supported: {', '.join(supported_ci)}"
+        )
         raise typer.Exit(1)
 
     project_dir.mkdir(parents=True)

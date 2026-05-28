@@ -22,9 +22,16 @@ async def db() -> AsyncSession:
 
 @pytest_asyncio.fixture
 async def client(db: AsyncSession) -> AsyncClient:
-    """Async HTTP client with isolated database."""
+    """Async HTTP client backed by the test's isolated db session."""
+    from app.core.database import get_db  # noqa: PLC0415
+
+    async def override_get_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",
     ) as ac:
         yield ac
+    app.dependency_overrides.clear()

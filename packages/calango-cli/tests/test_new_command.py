@@ -290,3 +290,21 @@ def test_new_creates_security_md(tmp_path):
     """calango new creates SECURITY.md."""
     runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
     assert (tmp_path / "my-api" / "SECURITY.md").is_file()
+
+
+def test_new_exits_1_for_unsupported_db(tmp_path):
+    """calango new exits with code 1 for unsupported --db value."""
+    result = runner.invoke(app, ["new", "my-api", "--db", "sqlite", "--path", str(tmp_path)])
+    assert result.exit_code == 1
+
+
+def test_new_exits_1_for_unsupported_ci(tmp_path):
+    """calango new exits with code 1 for unsupported --ci value."""
+    result = runner.invoke(app, ["new", "my-api", "--ci", "gitlab", "--path", str(tmp_path)])
+    assert result.exit_code == 1
+
+
+def test_new_creates_alembic_versions_gitkeep(tmp_path):
+    """calango new creates alembic/versions/.gitkeep."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert (tmp_path / "my-api" / "alembic" / "versions" / ".gitkeep").is_file()
