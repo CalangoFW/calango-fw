@@ -1,5 +1,10 @@
 [tool.uv.workspace]
-members = ["packages/calango-core", "packages/calango-cli"]
+members = [
+    "packages/calango-core",
+    "packages/calango-cli",
+    "packages/calango-plugin-base",
+    "packages/calango-plugins/calango-identity",
+]
 
 [dependency-groups]
 dev = [
@@ -11,9 +16,18 @@ dev = [
     "ty>=0.0.1a1",
     "pytest-cov>=7.1.0",
     "aiosqlite>=0.22.1",
+    "fakeredis>=2.26",
 ]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["packages"]
-addopts = "-v --tb=short"
+testpaths = [
+    "packages/calango-core/tests",
+    "packages/calango-cli/tests",
+    "packages/calango-plugin-base/tests",
+    "packages/calango-plugins/calango-identity/tests",
+]
+addopts = "-v --tb=short --import-mode=importlib"
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
