@@ -1,5 +1,10 @@
 [tool.uv.workspace]
-members = ["packages/calango-core", "packages/calango-cli"]
+members = [
+    "packages/calango-core",
+    "packages/calango-cli",
+    "packages/calango-plugin-base",
+    "packages/calango-plugins/calango-identity",
+]
 
 [dependency-groups]
 dev = [
@@ -11,6 +16,7 @@ dev = [
     "ty>=0.0.1a1",
     "pytest-cov>=7.1.0",
     "aiosqlite>=0.22.1",
+    "fakeredis>=2.26",
 ]
 
 [tool.pytest.ini_options]
