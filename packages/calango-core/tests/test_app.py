@@ -1,3 +1,5 @@
+from typing import ClassVar
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -106,3 +108,68 @@ class TestExceptionHandlers:
         assert "request_id" in body
         assert "traceback" not in str(body).lower()
         assert "runtimeerror" not in str(body).lower()
+
+
+def test_include_plugin_calls_register():
+    """include_plugin() calls plugin.register(app)."""
+    from pydantic_settings import BaseSettings
+
+    class FakePlugin:
+        name = "fake"
+        version = "0.1.0"
+        requires: ClassVar[list[str]] = []
+        registered_with: ClassVar = None
+
+        def register(self, app) -> None:
+            FakePlugin.registered_with = app
+
+        def migrations(self) -> list[str]:
+            return []
+
+        def settings(self) -> type[BaseSettings]:
+            return BaseSettings
+
+        def test_fixtures(self) -> list:
+            return []
+
+        def context_md(self) -> str:
+            return ""
+
+    app = Calango()
+    plugin = FakePlugin()
+    app.include_plugin(plugin)
+    assert FakePlugin.registered_with is app
+
+
+def test_include_plugin_raises_for_non_plugin():
+    """include_plugin() raises TypeError for objects not implementing PluginBase."""
+    app = Calango()
+    with pytest.raises(TypeError, match="does not implement PluginBase"):
+        app.include_plugin(object())  # type: ignore[arg-type]
+
+
+def test_include_plugin_accepts_valid_plugin():
+    """include_plugin() does not raise for a valid PluginBase implementation."""
+    from pydantic_settings import BaseSettings
+
+    class GoodPlugin:
+        name = "good"
+        version = "1.0.0"
+        requires: ClassVar[list[str]] = []
+
+        def register(self, app) -> None: ...
+
+        def migrations(self) -> list[str]:
+            return []
+
+        def settings(self) -> type[BaseSettings]:
+            return BaseSettings
+
+        def test_fixtures(self) -> list:
+            return []
+
+        def context_md(self) -> str:
+            return ""
+
+    app = Calango()
+    app.include_plugin(GoodPlugin())  # must not raise

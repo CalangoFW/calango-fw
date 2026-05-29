@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from calango_plugin_base import PluginBase
 from fastapi import FastAPI
 
 from calango.config import CalangoSettings, SecuritySettings
@@ -24,3 +25,13 @@ class Calango(FastAPI):
 
         self.add_exception_handler(CalangoException, calango_exception_handler)  # type: ignore[arg-type]
         self.add_exception_handler(Exception, unhandled_exception_handler)
+
+    def include_plugin(self, plugin: PluginBase) -> None:
+        """Register a Calango plugin. Calls plugin.register(self)."""
+        if not isinstance(plugin, PluginBase):
+            raise TypeError(
+                f"{type(plugin).__name__} does not implement PluginBase. "
+                "All 5 methods (register, migrations, settings, "
+                "test_fixtures, context_md) must be defined."
+            )
+        plugin.register(self)
