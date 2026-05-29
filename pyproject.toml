@@ -21,5 +21,13 @@ dev = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["packages"]
-addopts = "-v --tb=short"
+testpaths = [
+    "packages/calango-core/tests",
+    "packages/calango-cli/tests",
+    "packages/calango-plugin-base/tests",
+    "packages/calango-plugins/calango-identity/tests",
+]
+addopts = "-v --tb=short --import-mode=importlib"
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

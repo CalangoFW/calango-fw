@@ -1,1 +1,5 @@
-# calango-identity — implemented in Tasks 4-11
+from __future__ import annotations
+
+from .settings import IdentitySettings
+
+__all__ = ["IdentitySettings"]
