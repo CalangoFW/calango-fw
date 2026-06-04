@@ -308,3 +308,10 @@ def test_new_creates_alembic_versions_gitkeep(tmp_path):
     """calango new creates alembic/versions/.gitkeep."""
     runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
     assert (tmp_path / "my-api" / "alembic" / "versions" / ".gitkeep").is_file()
+
+
+def test_calango_no_args_shows_calango_brand():
+    """calango with no args prints the calango. banner."""
+    result = runner.invoke(app, [])
+    assert result.exit_code == 0
+    assert "calango" in result.output

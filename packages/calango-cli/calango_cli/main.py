@@ -2,6 +2,7 @@ import typer
 
 from calango_cli.commands.generate import app as generate_app
 from calango_cli.commands.new import new
+from calango_cli.ui import print_banner
 
 app = typer.Typer(name="calango", help="The fast, friendly Python web framework CLI.")
 app.command("new")(new)
@@ -20,4 +21,5 @@ def main(
         typer.echo(f"calango {__version__}")
         raise typer.Exit()
     if ctx.invoked_subcommand is None:
+        print_banner()
         typer.echo(ctx.get_help())
