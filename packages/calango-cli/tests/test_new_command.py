@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from typer.testing import CliRunner
 
 from calango_cli.main import app
@@ -315,3 +317,37 @@ def test_calango_no_args_shows_calango_brand():
     result = runner.invoke(app, [])
     assert result.exit_code == 0
     assert "calango" in result.output
+
+
+def test_new_without_name_in_non_interactive_exits_1(tmp_path):
+    """calango new with no name in a non-TTY environment exits 1."""
+    result = runner.invoke(app, ["new", "--path", str(tmp_path)])
+    assert result.exit_code == 1
+
+
+def test_new_wizard_creates_project_directory(tmp_path):
+    """calango new wizard scaffolds the project when run interactively."""
+    with (
+        patch("calango_cli.commands.new.is_interactive", return_value=True),
+        patch("calango_cli.commands.new.print_banner"),
+        patch("calango_cli.commands.new.ask", return_value="wizard-api"),
+        patch("calango_cli.commands.new.ask_choice", side_effect=["postgres", "github"]),
+        patch("calango_cli.commands.new.ask_confirm", return_value=False),
+    ):
+        result = runner.invoke(app, ["new", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+    assert (tmp_path / "wizard-api").is_dir()
+
+
+def test_new_wizard_project_contains_prompted_name(tmp_path):
+    """Wizard-created project uses the name supplied by the prompt."""
+    with (
+        patch("calango_cli.commands.new.is_interactive", return_value=True),
+        patch("calango_cli.commands.new.print_banner"),
+        patch("calango_cli.commands.new.ask", return_value="wizard-api"),
+        patch("calango_cli.commands.new.ask_choice", side_effect=["postgres", "github"]),
+        patch("calango_cli.commands.new.ask_confirm", return_value=False),
+    ):
+        runner.invoke(app, ["new", "--path", str(tmp_path)])
+    content = (tmp_path / "wizard-api" / "app" / "core" / "config.py").read_text()
+    assert "wizard-api" in content
