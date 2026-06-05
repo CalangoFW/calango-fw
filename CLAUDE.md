@@ -162,6 +162,28 @@ routers → services → repositories → models
 - **Repositories**: only layer that executes queries. No business logic.
 - **Models**: structure definition. No business methods.
 
+### CLI conventions (`calango_cli/`)
+
+All terminal output and interactive prompts are centralised in `calango_cli/ui.py`. Command files in `calango_cli/commands/` import only from `calango_cli.ui` — never from `rich` or `questionary` directly.
+
+**Interactive pattern** — commands use `str | None` for required arguments and fall back to an interactive wizard when the arg is missing and `is_interactive()` is True:
+
+```python
+def my_cmd(name: str | None = typer.Argument(None, help="...")) -> None:
+    if name is None:
+        if not is_interactive():
+            print_error("Missing argument 'NAME'.", hint="Run interactively: calango my-cmd")
+            raise typer.Exit(1)
+        name = ask("Name")
+```
+
+**CI safety** — flags always skip prompts. `is_interactive()` returns False when stdin or stdout is not a TTY, so scripts and CI pipelines never hang.
+
+**Brand colors for the terminal** — use Rich style names from `ui._THEME`:
+`calango.primary` (#2CBD6B), `calango.accent` (#E29A2E), `calango.danger` (#E5575C), `calango.muted` (#6A736E), `calango.text` (#A9B2AD).
+
+See `packages/calango-cli/CLAUDE.md` for the full authoring guide.
+
 ### What to NEVER do
 
 ```python
