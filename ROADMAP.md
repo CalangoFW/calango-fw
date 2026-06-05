@@ -10,7 +10,7 @@
 | Milestone | Phases | Completion criteria |
 |---|---|---|
 | **M1** "calango new works" | 0 + 1 + 2 | `calango new my-api && docker compose up` → API on `:8000` |
-| **M2** "generate resource" | 3 + 4 + 5 | `calango generate resource Product` → 8 files + tests running with real database |
+| **M2** "generate resource" | 3 + 4 + 5 | `calango generate resource Shop.Product` → 9 files + tests running with real database |
 | **M3** "minimal SaaS" | 6 | JWT auth + RBAC + all endpoints protected by default |
 | **M4** "SaaS core" | 7 + 8 | Multi-tenant (RLS) + payments (Stripe + Pix) |
 | **M5** "AI layer" | 9 | `calango generate agent Support` → agent running with MCP Server |
@@ -187,7 +187,7 @@ from calango.exceptions import (
 
 ---
 
-### Phase 2: calango-cli — calango new 🟡 Next
+### Phase 2: calango-cli — calango new ✅ Done
 
 **Goal:** `calango new my-api` generates a complete project that runs with `docker compose up`.
 
@@ -270,18 +270,19 @@ Includes: session DI factory (`get_db`), test utilities (`test_db_session`).
 
 ### Phase 4: calango-cli — generate resource
 
-`calango generate resource <Name>` generates 8 files:
+`calango generate resource <Context.Name>` generates 9 files (Phoenix-style contexts):
 
-1. `app/models/<name>.py` — SQLAlchemy model
-2. `app/schemas/<name>.py` — Input, Output, Update
-3. `app/repositories/<name>.py` — extends BaseRepository
-4. `app/services/<name>.py` — extends BaseService
-5. `app/routers/<name>.py` — FastAPI router
-6. `tests/unit/test_<name>_service.py` — 5 base cases with TODO
-7. `tests/integration/test_<name>_router.py` — security cases (401, 403, BOLA)
-8. `tests/factories/<name>_factory.py` — factory-boy
+1. `app/contexts/<ctx>/models/<name>.py` — SQLAlchemy model
+2. `app/contexts/<ctx>/schemas/<name>.py` — Input, Output, Update
+3. `app/contexts/<ctx>/repositories/<name>.py` — extends BaseRepository
+4. `app/contexts/<ctx>/services/<name>.py` — extends BaseService
+5. `app/contexts/<ctx>/__init__.py` — context public API (created or re-rendered)
+6. `app/routers/<name>.py` — FastAPI router, imports from context public API
+7. `tests/unit/<ctx>/test_<name>_service.py` — 5 base cases with TODO
+8. `tests/integration/<ctx>/test_<name>_router.py` — security cases (401, 403, BOLA)
+9. `tests/factories/<name>_factory.py` — factory-boy
 
-Pre-commit hook `calango-no-untested-resource`: fails if `app/services/X.py` exists without `tests/unit/test_X_service.py`.
+Pre-commit hook `calango-no-untested-resource`: fails if `app/contexts/<ctx>/services/X.py` exists without `tests/unit/<ctx>/test_X_service.py`.
 
 ### Phase 5: calango-cli — db commands
 
