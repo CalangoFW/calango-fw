@@ -47,6 +47,9 @@ dmypy.json
 .claude/worktrees/
 .worktrees/
 
+# Superpowers plugin (Claude Code tooling — local only)
+.superpowers/
+
 # OS
 .DS_Store
 Thumbs.db
