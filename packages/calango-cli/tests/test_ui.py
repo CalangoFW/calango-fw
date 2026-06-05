@@ -1,7 +1,5 @@
 from unittest.mock import patch
 
-import pytest
-
 
 def test_is_interactive_false_without_tty():
     from calango_cli import ui
@@ -55,6 +53,7 @@ def test_print_file_tree_single_file_does_not_raise():
 
 def test_ask_delegates_to_questionary_text():
     import questionary as _questionary
+
     from calango_cli import ui
     with patch("calango_cli.ui.questionary") as mock_q:
         mock_q.text.return_value.unsafe_ask.return_value = "my-answer"

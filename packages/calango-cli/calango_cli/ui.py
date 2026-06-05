@@ -94,7 +94,7 @@ def print_file_tree(root: str, files: list[str]) -> None:
 def ask(question: str, *, default: str = "") -> str:
     """Prompt for a text answer. Must only be called after is_interactive() is True."""
     return questionary.text(
-        f"› {question}",
+        f"› {question}",  # noqa: RUF001
         default=default,
         style=_STYLE,
     ).unsafe_ask()
@@ -119,7 +119,7 @@ def ask_choice(
         else:
             qchoices.append(questionary.Choice(title=c, value=c))
     return questionary.select(
-        f"› {question}",
+        f"› {question}",  # noqa: RUF001
         choices=qchoices,
         default=default,
         style=_STYLE,
@@ -129,7 +129,7 @@ def ask_choice(
 def ask_confirm(question: str, *, default: bool = True) -> bool:
     """Prompt for a yes/no confirmation."""
     return questionary.confirm(
-        f"› {question}",
+        f"› {question}",  # noqa: RUF001
         default=default,
         style=_STYLE,
     ).unsafe_ask()
