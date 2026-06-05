@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.0
+    rev: v0.15.14  # keep in sync with the ruff version CI resolves via uv
     hooks:
       - id: ruff
         args: [--fix]
@@ -24,3 +24,12 @@ repos:
       - id: check-toml
       - id: check-merge-conflict
       - id: detect-private-key
+        # Exclude known test keys and docstring examples — RS256 tests need real
+        # keys, and the identity settings/docs only show placeholder examples.
+        exclude: |
+          (?x)^(
+            packages/calango-plugins/calango-identity/calango_identity/settings\.py|
+            packages/calango-plugins/calango-identity/tests/conftest\.py|
+            docs/superpowers/plans/2026-05-28-calango-identity\.md|
+            docs/superpowers/specs/2026-05-28-calango-identity-design\.md
+          )$

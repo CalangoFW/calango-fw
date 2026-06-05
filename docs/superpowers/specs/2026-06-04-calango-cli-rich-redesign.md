@@ -1,7 +1,7 @@
 # Calango CLI — Rich + questionary Redesign
 
-**Date:** 2026-06-04  
-**Status:** Approved  
+**Date:** 2026-06-04
+**Status:** Approved
 **Scope:** `packages/calango-cli`
 
 ---

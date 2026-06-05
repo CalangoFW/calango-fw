@@ -1,6 +1,6 @@
 # Calango — Documento de Especificação
 
-> Versão 0.2 — TDD e AI-assisted development como pilares  
+> Versão 0.2 — TDD e AI-assisted development como pilares
 > Status: Em maturação
 
 ---
