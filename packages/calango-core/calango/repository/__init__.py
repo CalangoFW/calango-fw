@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -25,7 +26,7 @@ class BaseRepository[T]:
         """Fetch a single record by primary key. Returns None if not found."""
         return await self.session.get(self.model, record_id)
 
-    async def list(self, *, skip: int = 0, limit: int = 100) -> list[T]:
+    async def list(self, *, skip: int = 0, limit: int = 100) -> builtins.list[T]:
         """Fetch a paginated list of records."""
         result = await self.session.execute(select(self.model).offset(skip).limit(limit))
         return list(result.scalars().all())
@@ -61,7 +62,9 @@ class BaseRepository[T]:
         """Fetch with SELECT FOR UPDATE (pessimistic lock)."""
         result = await self.session.execute(
             select(self.model)
-            .where(self.model.id == record_id)  # type: ignore[attr-defined]
+            # SQLAlchemy declarative models expose `id`, but the generic T can't
+            # carry that. ty has no SQLAlchemy plugin, so the attribute is opaque.
+            .where(self.model.id == record_id)  # ty: ignore[unresolved-attribute]
             .with_for_update()
         )
         return result.scalar_one_or_none()

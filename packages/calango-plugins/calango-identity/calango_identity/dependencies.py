@@ -18,7 +18,7 @@ def public(func: Callable) -> Callable:
         async def health_check():
             return {"status": "ok"}
     """
-    func.__calango_public__ = True  # type: ignore[attr-defined]
+    func.__calango_public__ = True  # ty: ignore[unresolved-attribute]
     return func
 
 

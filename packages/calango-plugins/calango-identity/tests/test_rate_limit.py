@@ -18,7 +18,7 @@ def test_get_email_key_returns_email_from_state():
     # Simulate a request with login_email set on state
     state = type("State", (), {"login_email": "a@b.com"})()
     request = type("Req", (), {"state": state, "client": type("C", (), {"host": "127.0.0.1"})()})()
-    key = get_email_key(request)
+    key = get_email_key(request)  # ty: ignore[invalid-argument-type]  # duck-typed Request stub
     assert key == "a@b.com"
 
 
@@ -34,7 +34,7 @@ def test_get_email_key_falls_back_to_ip():
             "headers": {},
         },
     )()
-    key = get_email_key(request)
+    key = get_email_key(request)  # ty: ignore[invalid-argument-type]  # duck-typed Request stub
     # Should return something (IP or similar), not crash
     assert key is not None
     assert isinstance(key, str)
@@ -47,7 +47,7 @@ async def test_rate_limit_blocks_after_threshold():
     limiter = make_limiter("memory://")
     app = FastAPI()
     app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # ty: ignore[invalid-argument-type]
 
     @app.get("/limited")
     @limiter.limit("2/minute")

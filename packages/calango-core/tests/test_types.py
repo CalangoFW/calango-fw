@@ -39,7 +39,7 @@ class TestCalangoModel:
             value: int
 
         with pytest.raises(PydanticValidationError):
-            Item(value="não é inteiro")
+            Item(value="não é inteiro")  # ty: ignore[invalid-argument-type]  # intentional: non-int
 
 
 class TestPaginatedResponse:

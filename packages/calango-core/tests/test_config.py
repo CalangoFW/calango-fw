@@ -26,7 +26,7 @@ class TestRedisSettings:
 class TestSecuritySettings:
     def test_secret_key_e_obrigatorio(self):
         with pytest.raises(ValidationError):
-            SecuritySettings()
+            SecuritySettings()  # ty: ignore[missing-argument]  # intentional: SECRET_KEY omitted
 
     def test_algoritmo_padrao_rs256(self):
         sec = SecuritySettings(SECRET_KEY="minha-chave-secreta")

@@ -145,7 +145,7 @@ def test_include_plugin_raises_for_non_plugin():
     """include_plugin() raises TypeError for objects not implementing PluginBase."""
     app = Calango()
     with pytest.raises(TypeError, match="does not implement PluginBase"):
-        app.include_plugin(object())  # type: ignore[arg-type]
+        app.include_plugin(object())  # ty: ignore[invalid-argument-type]  # intentional: non-PluginBase
 
 
 def test_include_plugin_accepts_valid_plugin():

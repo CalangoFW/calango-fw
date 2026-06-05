@@ -94,7 +94,8 @@ class TestBaseService:
         """A concrete service subclass can call repository CRUD methods."""
         data = ItemCreate(id=str(uuid4()), name="Widget")
         item = await repo.create(data)
-        fetched = await service.repository.get(item.id)
+        # Test model uses a str primary key for SQLite; get() is typed for UUID.
+        fetched = await service.repository.get(item.id)  # ty: ignore[invalid-argument-type]
         assert fetched is not None
         assert fetched.name == "Widget"
 

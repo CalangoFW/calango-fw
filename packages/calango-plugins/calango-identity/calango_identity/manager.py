@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncGenerator
 
 from fastapi import Request
 from fastapi_users import BaseUserManager, UUIDIDMixin
 from fastapi_users.db import SQLAlchemyUserDatabase
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from calango_identity.models import User
 from calango_identity.settings import IdentitySettings
@@ -28,7 +30,7 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
 def make_get_user_manager(settings: IdentitySettings):
     """Returns a FastAPI dependency that yields UserManager given an AsyncSession."""
 
-    async def get_user_manager(session) -> UserManager:
+    async def get_user_manager(session: AsyncSession) -> AsyncGenerator[UserManager, None]:
         yield UserManager(SQLAlchemyUserDatabase(session, User), settings)
 
     return get_user_manager

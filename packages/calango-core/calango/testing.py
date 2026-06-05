@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 async def test_db_session(
     database_url: str = "sqlite+aiosqlite:///:memory:",
     *,
-    base: DeclarativeBase | None = None,
+    base: type[DeclarativeBase] | None = None,
 ) -> AsyncGenerator[AsyncSession, None]:
     """
     Async context manager that provides an isolated database session for tests.

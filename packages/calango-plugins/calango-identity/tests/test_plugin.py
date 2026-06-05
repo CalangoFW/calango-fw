@@ -52,7 +52,7 @@ def test_identity_plugin_register_adds_auth_routes(settings):
     plugin = IdentityPlugin(settings=settings)
     plugin.register(app)
 
-    routes = [r.path for r in app.routes]
+    routes = [getattr(r, "path", "") for r in app.routes]
     assert any("/auth" in r for r in routes)
 
 
@@ -71,5 +71,5 @@ def test_include_plugin_works_with_calango():
     plugin = IdentityPlugin(settings=identity_settings)
     app.include_plugin(plugin)
 
-    routes = [r.path for r in app.routes]
+    routes = [getattr(r, "path", "") for r in app.routes]
     assert any("/auth" in r for r in routes)

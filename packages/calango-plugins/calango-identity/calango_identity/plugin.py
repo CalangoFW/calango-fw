@@ -31,14 +31,18 @@ class IdentityPlugin:
     requires: ClassVar[list[str]] = ["calango-core>=0.1.0", "calango-plugin-base>=0.1.0"]
 
     def __init__(self, settings: IdentitySettings | None = None) -> None:
-        self._settings = settings or IdentitySettings()
+        # pydantic-settings populates PRIVATE_KEY/PUBLIC_KEY from env at runtime;
+        # ty has no pydantic plugin so it sees them as missing required args.
+        self._settings = settings or IdentitySettings()  # ty: ignore[missing-argument]
         self._limiter = make_limiter(self._settings.REDIS_URL)
 
     def register(self, app: FastAPI) -> None:
         """Register auth routers, rate limiter, and exception handler."""
         # Rate limiting middleware
         app.state.limiter = self._limiter
-        app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
+        # slowapi's handler signature is broader than Starlette's expected type;
+        # the mismatch is benign at runtime.
+        app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # ty: ignore[invalid-argument-type]
 
         # Auth router — uses calango-core get_db if available, else a no-op stub
         try:

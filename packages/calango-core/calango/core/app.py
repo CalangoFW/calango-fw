@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from calango_plugin_base import PluginBase
 from fastapi import FastAPI
 
@@ -10,7 +12,7 @@ from calango.exceptions import CalangoException
 
 
 class Calango(FastAPI):
-    def __init__(self, settings: CalangoSettings | None = None, **kwargs: object) -> None:
+    def __init__(self, settings: CalangoSettings | None = None, **kwargs: Any) -> None:
         if settings is None:
             settings = CalangoSettings(security=SecuritySettings(SECRET_KEY="changeme"))  # noqa: S106
 
@@ -23,7 +25,9 @@ class Calango(FastAPI):
 
         self.add_middleware(CalangoMiddleware)
 
-        self.add_exception_handler(CalangoException, calango_exception_handler)  # type: ignore[arg-type]
+        # Starlette types handlers as (Request, Exception); ours narrow the second
+        # param to CalangoException. The narrowing is safe but unexpressible here.
+        self.add_exception_handler(CalangoException, calango_exception_handler)  # ty: ignore[invalid-argument-type]
         self.add_exception_handler(Exception, unhandled_exception_handler)
 
     def include_plugin(self, plugin: PluginBase) -> None:

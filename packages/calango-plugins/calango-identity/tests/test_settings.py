@@ -10,13 +10,13 @@ from pydantic import ValidationError
 def test_settings_requires_private_key():
     """IdentitySettings raises ValidationError if PRIVATE_KEY is missing."""
     with pytest.raises(ValidationError):
-        IdentitySettings(PUBLIC_KEY="some-key")
+        IdentitySettings(PUBLIC_KEY="some-key")  # ty: ignore[missing-argument]  # intentional
 
 
 def test_settings_requires_public_key():
     """IdentitySettings raises ValidationError if PUBLIC_KEY is missing."""
     with pytest.raises(ValidationError):
-        IdentitySettings(PRIVATE_KEY="some-key")
+        IdentitySettings(PRIVATE_KEY="some-key")  # ty: ignore[missing-argument]  # intentional
 
 
 def test_settings_defaults():
