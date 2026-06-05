@@ -193,6 +193,17 @@ def my_cmd(name: str | None = typer.Argument(None, help="...")) -> None:
 
 See `packages/calango-cli/CLAUDE.md` for the full authoring guide.
 
+### GitHub Actions — keep current
+
+Actions must use Node.js 24-compatible versions. Current pinned versions:
+
+```yaml
+actions/checkout@v5          # ✅ Node.js 24
+astral-sh/setup-uv@v6        # ✅ Node.js 24
+```
+
+When adding or updating any action, verify it supports Node.js 24 — GitHub removes Node.js 20 from runners in September 2026. Never pin to a version without checking its Node.js runtime.
+
 ### What to NEVER do
 
 ```python
