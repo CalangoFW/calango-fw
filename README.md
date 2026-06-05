@@ -40,7 +40,6 @@ cd my-project && docker compose up
 
 In under two minutes you get a project with database, cache, storage, CI/CD, `CLAUDE.md` for your AI assistants, and tests ready to write.
 
-> *Corre não, corre sim — mas com testes!* 🦎
 
 ---
 
@@ -436,6 +435,6 @@ uv run pytest packages/
   <img src="docs/assets/calango-mark-green-transparent-1024.png" alt="Calango" width="40">
 </picture>
 
-*Corre não, corre sim — mas com testes.* · Made with ☕ in Brazil
+Made with ☕ in Brazil
 
 </div>
