@@ -351,3 +351,15 @@ def test_new_wizard_project_contains_prompted_name(tmp_path):
         runner.invoke(app, ["new", "--path", str(tmp_path)])
     content = (tmp_path / "wizard-api" / "app" / "core" / "config.py").read_text()
     assert "wizard-api" in content
+
+
+def test_new_creates_contexts_dir(tmp_path):
+    """calango new creates app/contexts/ directory."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert (tmp_path / "my-api" / "app" / "contexts").is_dir()
+
+
+def test_new_creates_routers_dir(tmp_path):
+    """calango new creates app/routers/ directory."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert (tmp_path / "my-api" / "app" / "routers").is_dir()

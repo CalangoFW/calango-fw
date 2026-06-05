@@ -25,7 +25,7 @@
 
 ## What is Calango?
 
-Calango is a Python meta-framework for web development inspired by **Phoenix Framework** and **Nest.js** — with Rails' opinionated structure and FastAPI's async core.
+Calango is an **API-first** Python meta-framework for web development inspired by **Phoenix Framework** and **Nest.js** — with Rails' opinionated structure and FastAPI's async core.
 
 The premise: you shouldn't spend energy deciding where to put each file, how to configure CI, or how to structure your tests. Calango decides that for you — and when you need to deviate from the convention, the exit is explicit and documented.
 
@@ -59,8 +59,10 @@ Calango was designed from scratch for developers who use Claude Code, Cursor, Co
 
 ```bash
 # Happy path: zero configuration
-calango generate resource Order
-# Creates: model + schema + repository + service + router + tests + factory
+calango generate resource Shop.Order
+# Creates in app/contexts/shop/: model + schema + repository + service
+# Creates in app/routers/: router
+# Creates in tests/: unit/shop/ + integration/shop/ + factory
 
 # Need to deviate? It's explicit:
 # Create elsewhere — the framework won't block you,
@@ -188,11 +190,17 @@ calango new my-api --db=postgres --ci=github --agents
 ### 🧪 TDD as the path of least resistance
 
 ```bash
-calango generate resource Order
+calango generate resource Shop.Order
 
-# Creates alongside the code:
-# tests/unit/test_order_service.py       — base cases pre-written
-# tests/integration/test_order_router.py — security cases included
+# Creates alongside the code (9 files total):
+# app/contexts/shop/models/order.py
+# app/contexts/shop/schemas/order.py
+# app/contexts/shop/repositories/order.py
+# app/contexts/shop/services/order.py
+# app/contexts/shop/__init__.py          — context public API, auto-updated
+# app/routers/order.py                   — imports from app.contexts.shop
+# tests/unit/shop/test_order_service.py  — base cases pre-written
+# tests/integration/shop/test_order_router.py — security cases included
 # tests/factories/order_factory.py       — factory-boy ready
 ```
 
@@ -328,20 +336,23 @@ calango db suggest-indexes
 ```
 my-project/
 ├── app/
-│   ├── models/         # SQLAlchemy — structure, no business logic
-│   ├── schemas/        # Pydantic — Input, Output, Update
-│   ├── repositories/   # Database access — queries only
-│   ├── services/       # Business logic — only here
-│   ├── routers/        # HTTP — validation and delegation
-│   └── agents/         # Agents and tools (if plugin active)
+│   ├── contexts/               # Domain contexts (Phoenix-style)
+│   │   └── shop/               # One context per domain boundary
+│   │       ├── __init__.py     # Public API — import from here only
+│   │       ├── models/         # SQLAlchemy — structure, no business logic
+│   │       ├── schemas/        # Pydantic — Input, Output, Update
+│   │       ├── repositories/   # Database access — queries only
+│   │       └── services/       # Business logic — only here
+│   ├── routers/                # HTTP layer — validation and delegation
+│   └── agents/                 # Agents and tools (if plugin active)
 ├── tests/
-│   ├── unit/           # Services and schemas — no database
-│   ├── integration/    # Routers with real database
-│   └── factories/      # factory-boy
-├── CLAUDE.md           # Context for Claude Code — auto-maintained
-├── compose.yml         # postgres + redis + minio + ollama
-├── Dockerfile          # dev → ci → production
-└── .github/workflows/  # CI (6 gates) + CD (staging → prod)
+│   ├── unit/shop/              # Service tests per context
+│   ├── integration/shop/       # Router tests with real database
+│   └── factories/              # factory-boy
+├── CLAUDE.md                   # Context for Claude Code — auto-maintained
+├── compose.yml                 # postgres + redis + minio + ollama
+├── Dockerfile                  # dev → ci → production
+└── .github/workflows/          # CI (6 gates) + CD (staging → prod)
 ```
 
 ---

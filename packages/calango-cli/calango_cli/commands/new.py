@@ -20,6 +20,8 @@ _TEMPLATE_FILES = [
     ("app/main.py.jinja", "app/main.py"),
     ("app/core/__init__.py.jinja", "app/core/__init__.py"),
     ("app/core/config.py.jinja", "app/core/config.py"),
+    ("app/contexts/.gitkeep.jinja", "app/contexts/.gitkeep"),
+    ("app/routers/.gitkeep.jinja", "app/routers/.gitkeep"),
     ("tests/__init__.py.jinja", "tests/__init__.py"),
     ("tests/conftest.py.jinja", "tests/conftest.py"),
     ("alembic/env.py.jinja", "alembic/env.py"),

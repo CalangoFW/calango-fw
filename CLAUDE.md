@@ -7,7 +7,7 @@
 
 ## What is Calango
 
-**Calango** is a Python meta-framework for web development with flexible Convention over Configuration (CoC). Think Phoenix Framework or Nest.js, but Python — with AI as a first-class citizen and TDD as the path of least resistance.
+**Calango** is an **API-first** Python meta-framework for web development with flexible Convention over Configuration (CoC). Think Phoenix Framework or Nest.js, but Python — with AI as a first-class citizen and TDD as the path of least resistance.
 
 The mascot is a calango lizard 🦎 wearing nerd glasses and a bow tie. Personality: clever, quick, a little bold — but always helpful.
 
@@ -92,17 +92,22 @@ my-project/
 │   ├── core/
 │   │   ├── __init__.py
 │   │   └── config.py           # class Settings(CalangoSettings)
-│   ├── models/                 # SQLAlchemy models — NO business logic
-│   ├── schemas/                # Pydantic schemas — suffixes: Input, Output, Update
-│   ├── repositories/           # Only layer that touches the database
-│   ├── services/               # ALL business logic lives here
-│   ├── routers/                # FastAPI routers — validation and delegation only
+│   ├── contexts/               # Domain contexts (Phoenix-style) — replaces flat models/schemas/etc.
+│   │   └── <domain>/           # e.g. accounts/, catalog/, orders/
+│   │       ├── __init__.py     # Context public API — only import from here outside the context
+│   │       ├── models/         # SQLAlchemy models — NO business logic
+│   │       ├── schemas/        # Pydantic schemas — suffixes: Input, Output, Update
+│   │       ├── repositories/   # Only layer that touches the database
+│   │       └── services/       # ALL business logic lives here
+│   ├── routers/                # FastAPI routers — web layer, separate from domain
 │   ├── agents/                 # AgentRouter and tools (when agents plugin active)
 │   └── plugins/                # Installed plugin configuration
 ├── tests/
 │   ├── conftest.py             # Global fixtures (db, client)
-│   ├── unit/                   # Service and schema tests
-│   ├── integration/            # Router tests with async httpx
+│   ├── unit/
+│   │   └── <domain>/           # e.g. unit/accounts/test_user_service.py
+│   ├── integration/
+│   │   └── <domain>/           # e.g. integration/accounts/test_user_router.py
 │   └── factories/              # factory-boy for fixtures
 ├── alembic/
 │   └── versions/
@@ -130,6 +135,10 @@ my-project/
 ### Naming
 
 ```python
+# Contexts — PascalCase (domain grouping, e.g. Shop, Accounts, Catalog)
+# CLI: calango generate resource Shop.Order
+# Directory: app/contexts/shop/
+
 # Models — PascalCase, no suffix
 class Order(Base): ...
 
@@ -144,7 +153,7 @@ class OrderRepository(BaseRepository[Order]): ...
 # Services — PascalCase + Service
 class OrderService(BaseService[OrderRepository]): ...
 
-# Routers — snake_case, one file per resource
+# Routers — snake_case, one file per resource, lives in app/routers/ (not inside context)
 # app/routers/order.py
 
 # Tests — descriptive, document the business rule
@@ -219,6 +228,13 @@ SECRET_KEY = "my-secret-key"  # Use pydantic-settings + env var
 
 # ❌ PII in logs
 logger.info(f"Login: {user.email} password={password}")  # NEVER
+
+# ❌ Cross-context internal import — breaks domain boundaries
+from app.contexts.catalog.models.product import Product  # access via public API instead
+
+# ❌ Flat resource generation (no context)
+# calango generate resource Order  → WRONG (missing context)
+# calango generate resource Shop.Order  → CORRECT
 ```
 
 ### What to ALWAYS do
@@ -262,6 +278,13 @@ class OrderOutput(CalangoModel):
 
 class OrderUpdate(CalangoModel):
     status: Literal["confirmed", "cancelled"] | None = None
+
+# ✅ Router imports from context public API (never from context internals)
+from app.contexts.shop import OrderService, OrderRepository, OrderInput, OrderOutput
+
+# ✅ Cross-context dependencies use the public API only
+from app.contexts.accounts import UserOutput  # ✅ public API
+# from app.contexts.accounts.models.user import User  # ❌ internal
 ```
 
 ---
@@ -270,13 +293,13 @@ class OrderUpdate(CalangoModel):
 
 ### Mandatory structure per resource
 
-For every `app/services/order.py` there must be a `tests/unit/test_order_service.py`.
+For every `app/contexts/shop/services/order.py` there must be a `tests/unit/shop/test_order_service.py`.
 The `calango-no-untested-resource` pre-commit hook enforces this.
 
 ### Test pattern
 
 ```python
-# tests/unit/test_order_service.py
+# tests/unit/shop/test_order_service.py
 import pytest
 from tests.factories.order_factory import OrderFactory
 
@@ -293,7 +316,7 @@ class TestOrderService:
         """BOLA: isolation by owner_id."""
         ...
 
-# tests/integration/test_order_router.py
+# tests/integration/shop/test_order_router.py
 class TestOrderRouter:
     async def test_endpoint_requires_authentication(self, client):
         response = await client.get("/api/v1/orders/some-id")
@@ -696,7 +719,7 @@ Fonts: `JetBrains Mono` (code), `Inter` (interface)
 calango new <name> [--db=postgres|mongo] [--ci=github|gitlab|bitbucket] [--agents]
 
 # Code generation
-calango generate resource <name>     # model + schema + repo + service + router + tests
+calango generate resource <Context.Name>  # model + schema + repo + service + router + tests
 calango generate model <name>
 calango generate service <name>
 calango generate agent <name>

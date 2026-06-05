@@ -1,0 +1,20 @@
+# {{ context_name }} context — public API
+# Do not import sub-modules directly outside this package.
+{% for r in resources %}
+from app.contexts.{{ context_snake }}.schemas.{{ r.snake }} import (
+    {{ r.name }}Input,
+    {{ r.name }}Output,
+    {{ r.name }}Update,
+)
+from app.contexts.{{ context_snake }}.repositories.{{ r.snake }} import {{ r.name }}Repository
+from app.contexts.{{ context_snake }}.services.{{ r.snake }} import {{ r.name }}Service
+{% endfor %}
+__all__ = [
+{%- for r in resources %}
+    "{{ r.name }}Input",
+    "{{ r.name }}Output",
+    "{{ r.name }}Update",
+    "{{ r.name }}Repository",
+    "{{ r.name }}Service",
+{%- endfor %}
+]

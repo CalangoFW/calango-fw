@@ -1,7 +1,7 @@
 import uuid
 import factory
 
-from app.models.{{ resource_snake }} import {{ resource_name }}
+from app.contexts.{{ context_snake }}.models.{{ resource_snake }} import {{ resource_name }}
 
 
 class {{ resource_name }}Factory(factory.Factory):
