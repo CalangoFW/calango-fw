@@ -1,17 +1,19 @@
 <div align="center">
 
-```
-  ╔═══════════════════════════════╗
-  ║   🦎  C A L A N G O           ║
-  ║   The fast, friendly          ║
-  ║   Python web framework        ║
-  ╚═══════════════════════════════╝
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/calango-mark-white-transparent-1024.png">
+  <img src="docs/assets/calango-mark-green-transparent-1024.png" alt="Calango" width="96">
+</picture>
 
-[![Python](https://img.shields.io/badge/python-3.12+-4a9e3f?style=flat-square&logo=python&logoColor=white)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-4a9e3f?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![License](https://img.shields.io/badge/license-PolyForm%20NonCommercial-5cb84f?style=flat-square)](LICENSE)
-[![Status](https://img.shields.io/badge/status-early%20development-c47f17?style=flat-square)]()
+# calango
+
+**The fast, friendly Python web framework.**
+
+[![Python](https://img.shields.io/badge/python-3.12+-2CBD6B?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-2CBD6B?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![License](https://img.shields.io/badge/license-PolyForm%20NonCommercial-2CBD6B?style=flat-square)](LICENSE)
+[![Status](https://img.shields.io/badge/status-early%20development-E29A2E?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-161%20passing-2CBD6B?style=flat-square)]()
 
 *Convention over Configuration. TDD as the default path. AI as a first-class citizen.*
 
@@ -429,8 +431,11 @@ uv run pytest packages/
 
 <div align="center">
 
-**Made with 🦎 and ☕ in Brazil**
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/calango-mark-white-transparent-1024.png">
+  <img src="docs/assets/calango-mark-green-transparent-1024.png" alt="Calango" width="40">
+</picture>
 
-*Corre não, corre sim — mas com testes!*
+*Corre não, corre sim — mas com testes.* · Made with ☕ in Brazil
 
 </div>
