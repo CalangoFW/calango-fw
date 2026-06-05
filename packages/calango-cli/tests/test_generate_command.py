@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import patch
 
 from typer.testing import CliRunner
 
@@ -262,3 +263,33 @@ def test_generate_resource_generates_all_8_files(tmp_path):
     for f in expected_files:
         assert f.exists(), f"Expected file not found: {f}"
     assert len(expected_files) == 8
+
+
+def test_generate_resource_without_name_in_non_interactive_exits_1(tmp_path):
+    """calango generate resource with no name in non-TTY exits 1."""
+    _make_project(tmp_path)
+    result = runner.invoke(app, ["generate", "resource", "--path", str(tmp_path)])
+    assert result.exit_code == 1
+
+
+def test_generate_resource_wizard_creates_all_files(tmp_path):
+    """Interactive wizard creates all 8 resource files."""
+    _make_project(tmp_path)
+    with (
+        patch("calango_cli.commands.generate.is_interactive", return_value=True),
+        patch("calango_cli.commands.generate.ask", return_value="Order"),
+    ):
+        result = runner.invoke(app, ["generate", "resource", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+    assert (tmp_path / "app" / "models" / "order.py").exists()
+
+
+def test_generate_resource_wizard_validates_pascal_case(tmp_path):
+    """Wizard rejects a resource name that does not start with uppercase."""
+    _make_project(tmp_path)
+    with (
+        patch("calango_cli.commands.generate.is_interactive", return_value=True),
+        patch("calango_cli.commands.generate.ask", return_value="order"),
+    ):
+        result = runner.invoke(app, ["generate", "resource", "--path", str(tmp_path)])
+    assert result.exit_code == 1
