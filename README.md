@@ -85,7 +85,7 @@ calango plugin add search        # FTS, Typesense, Meilisearch
 
 ## What works today
 
-`calango-core` is fully implemented with 54 tests and 97% coverage.
+`calango-core` is fully implemented with 54 tests and 97% coverage. `calango-cli` (`calango new` + `calango generate resource`) is implemented with 107 tests.
 
 ### App factory with built-in security
 
@@ -167,10 +167,6 @@ settings = CalangoSettings(
 APP_NAME="Store API" SECURITY__SECRET_KEY="key" uv run uvicorn app:app
 ```
 
----
-
-## Planned features
-
 ### 🏗️ Full scaffold in one command
 
 ```bash
@@ -206,6 +202,10 @@ calango generate resource Shop.Order
 
 Pre-commit blocks commits if a resource exists without its corresponding test.
 CI fails if coverage drops below 80%.
+
+---
+
+## Planned features
 
 ### 🤖 AI as a first-class citizen
 
@@ -378,8 +378,8 @@ my-project/
 
 | Milestone | What it delivers | Status |
 |---|---|---|
-| **M1** "calango new works" | Core + CLI scaffold | 🟡 In progress |
-| **M2** "generate resource" | Full CRUD scaffold with real database | 🔴 Planned |
+| **M1** "calango new works" | Core + CLI scaffold | 🟢 Done |
+| **M2** "generate resource" | Full CRUD scaffold with real database | 🟡 In progress |
 | **M3** "minimal SaaS" | JWT auth + RBAC + protected endpoints | 🔴 Planned |
 | **M4** "SaaS core" | Multi-tenancy (RLS) + payments (Stripe + Pix) | 🔴 Planned |
 | **M5** "AI layer" | `calango generate agent` → running agent with MCP | 🔴 Planned |
@@ -393,9 +393,9 @@ See [ROADMAP.md](ROADMAP.md) for the full breakdown.
 |---|---|
 | `calango-core` — exceptions, settings, types | ✅ Done (21 tests) |
 | `calango-core` — app factory, middleware, handlers | ✅ Done (10 tests) |
-| `calango-cli` — `calango new` | 🟡 Next |
-| `calango-core` — `BaseRepository` + `BaseService` | 🔴 Planned |
-| `calango-cli` — `calango generate resource` | 🔴 Planned |
+| `calango-cli` — `calango new` | ✅ Done |
+| `calango-cli` — `calango generate resource` | ✅ Done (scaffold; no DB layer yet) |
+| `calango-core` — `BaseRepository` + `BaseService` | 🟡 Next |
 | `calango-identity` | 🔴 Planned |
 | `calango-agents` | 🔴 Planned |
 | `calango-payments` | 🔴 Planned |
