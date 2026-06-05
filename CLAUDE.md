@@ -195,14 +195,14 @@ See `packages/calango-cli/CLAUDE.md` for the full authoring guide.
 
 ### GitHub Actions — keep current
 
-Actions must use Node.js 24-compatible versions. Current pinned versions:
+All workflow files must include the top-level env var:
 
 ```yaml
-actions/checkout@v5          # ✅ Node.js 24
-astral-sh/setup-uv@v6        # ✅ Node.js 24
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 ```
 
-When adding or updating any action, verify it supports Node.js 24 — GitHub removes Node.js 20 from runners in September 2026. Never pin to a version without checking its Node.js runtime.
+This ensures every action runs on Node.js 24 regardless of the action's pinned version. GitHub removes Node.js 20 from runners in September 2026. Never remove this env var and never add a workflow file without it.
 
 ### What to NEVER do
 
