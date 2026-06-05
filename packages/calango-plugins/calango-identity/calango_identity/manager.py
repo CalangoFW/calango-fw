@@ -16,9 +16,7 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         self.reset_password_token_secret = settings.PRIVATE_KEY
         self.verification_token_secret = settings.PRIVATE_KEY
 
-    async def on_after_register(
-        self, user: User, request: Request | None = None
-    ) -> None:
+    async def on_after_register(self, user: User, request: Request | None = None) -> None:
         pass  # Hook: send welcome email, etc.
 
     async def on_after_forgot_password(

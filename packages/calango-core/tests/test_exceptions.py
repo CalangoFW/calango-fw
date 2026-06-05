@@ -1,4 +1,3 @@
-
 from calango.exceptions import (
     AuthenticationError,
     AuthorizationError,

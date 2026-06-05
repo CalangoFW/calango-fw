@@ -83,9 +83,7 @@ class TestBaseService:
         service = BaseService(repo)
         assert service._repository is repo
 
-    async def test_service_repository_property_returns_repo(
-        self, repo: ItemRepository
-    ) -> None:
+    async def test_service_repository_property_returns_repo(self, repo: ItemRepository) -> None:
         """repository property returns the injected repository instance."""
         service = BaseService(repo)
         assert service.repository is repo
@@ -100,9 +98,7 @@ class TestBaseService:
         assert fetched is not None
         assert fetched.name == "Widget"
 
-    async def test_service_accepts_any_repository_subclass(
-        self, session: AsyncSession
-    ) -> None:
+    async def test_service_accepts_any_repository_subclass(self, session: AsyncSession) -> None:
         """BaseService works with any BaseRepository subclass."""
         repo = ItemRepository(session)
         service = BaseService(repo)

@@ -37,14 +37,14 @@ def _render_resource_templates(
     ctx = context["context_snake"]
     res = context["resource_snake"]
     files = [
-        ("resource/model.py.jinja",        f"app/contexts/{ctx}/models/{res}.py"),
-        ("resource/schemas.py.jinja",      f"app/contexts/{ctx}/schemas/{res}.py"),
-        ("resource/repository.py.jinja",   f"app/contexts/{ctx}/repositories/{res}.py"),
-        ("resource/service.py.jinja",      f"app/contexts/{ctx}/services/{res}.py"),
-        ("resource/router.py.jinja",       f"app/routers/{res}.py"),
+        ("resource/model.py.jinja", f"app/contexts/{ctx}/models/{res}.py"),
+        ("resource/schemas.py.jinja", f"app/contexts/{ctx}/schemas/{res}.py"),
+        ("resource/repository.py.jinja", f"app/contexts/{ctx}/repositories/{res}.py"),
+        ("resource/service.py.jinja", f"app/contexts/{ctx}/services/{res}.py"),
+        ("resource/router.py.jinja", f"app/routers/{res}.py"),
         ("resource/test_service.py.jinja", f"tests/unit/{ctx}/test_{res}_service.py"),
-        ("resource/test_router.py.jinja",  f"tests/integration/{ctx}/test_{res}_router.py"),
-        ("resource/factory.py.jinja",      f"tests/factories/{res}_factory.py"),
+        ("resource/test_router.py.jinja", f"tests/integration/{ctx}/test_{res}_router.py"),
+        ("resource/factory.py.jinja", f"tests/factories/{res}_factory.py"),
     ]
     created = []
     for template_name, output_path in files:

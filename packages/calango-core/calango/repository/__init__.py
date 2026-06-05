@@ -27,9 +27,7 @@ class BaseRepository[T]:
 
     async def list(self, *, skip: int = 0, limit: int = 100) -> list[T]:
         """Fetch a paginated list of records."""
-        result = await self.session.execute(
-            select(self.model).offset(skip).limit(limit)
-        )
+        result = await self.session.execute(select(self.model).offset(skip).limit(limit))
         return list(result.scalars().all())
 
     async def create(self, data: BaseModel) -> T:

@@ -10,27 +10,31 @@ from rich.text import Text
 from rich.theme import Theme
 from rich.tree import Tree
 
-_THEME = Theme({
-    "calango.primary": "#2CBD6B",
-    "calango.primary.bright": "#3FC878",
-    "calango.accent": "#E29A2E",
-    "calango.danger": "#E5575C",
-    "calango.muted": "#6A736E",
-    "calango.text": "#A9B2AD",
-})
+_THEME = Theme(
+    {
+        "calango.primary": "#2CBD6B",
+        "calango.primary.bright": "#3FC878",
+        "calango.accent": "#E29A2E",
+        "calango.danger": "#E5575C",
+        "calango.muted": "#6A736E",
+        "calango.text": "#A9B2AD",
+    }
+)
 
-_STYLE = questionary.Style([
-    ("qmark", "fg:#2CBD6B bold"),
-    ("question", "fg:#F1F4F2 bold"),
-    ("answer", "fg:#2CBD6B bold"),
-    ("pointer", "fg:#2CBD6B bold"),
-    ("highlighted", "fg:#2CBD6B bold"),
-    ("selected", "fg:#3FC878"),
-    ("separator", "fg:#6A736E"),
-    ("instruction", "fg:#6A736E"),
-    ("text", "fg:#A9B2AD"),
-    ("disabled", "fg:#6A736E italic"),
-])
+_STYLE = questionary.Style(
+    [
+        ("qmark", "fg:#2CBD6B bold"),
+        ("question", "fg:#F1F4F2 bold"),
+        ("answer", "fg:#2CBD6B bold"),
+        ("pointer", "fg:#2CBD6B bold"),
+        ("highlighted", "fg:#2CBD6B bold"),
+        ("selected", "fg:#3FC878"),
+        ("separator", "fg:#6A736E"),
+        ("instruction", "fg:#6A736E"),
+        ("text", "fg:#A9B2AD"),
+        ("disabled", "fg:#6A736E italic"),
+    ]
+)
 
 console = Console(theme=_THEME)
 
@@ -47,12 +51,14 @@ def print_banner(subtitle: str = "") -> None:
     title.append(".", style="calango.accent bold")
     if subtitle:
         title.append(f"  {subtitle}", style="calango.muted")
-    console.print(Panel(
-        title,
-        subtitle="The fast, friendly Python web framework",
-        border_style="calango.primary",
-        padding=(0, 1),
-    ))
+    console.print(
+        Panel(
+            title,
+            subtitle="The fast, friendly Python web framework",
+            border_style="calango.primary",
+            padding=(0, 1),
+        )
+    )
 
 
 def print_success(message: str, *, detail: str | None = None) -> None:
@@ -76,11 +82,13 @@ def print_info(label: str, fields: dict[str, str]) -> None:
     table.add_column()
     for key, value in fields.items():
         table.add_row(key, value)
-    console.print(Panel(
-        table,
-        title=f"[calango.primary]⬡[/calango.primary]  {label}",
-        border_style="calango.muted",
-    ))
+    console.print(
+        Panel(
+            table,
+            title=f"[calango.primary]⬡[/calango.primary]  {label}",
+            border_style="calango.muted",
+        )
+    )
 
 
 def print_file_tree(root: str, files: list[str]) -> None:
@@ -111,11 +119,13 @@ def ask_choice(
     qchoices = []
     for c in choices:
         if disabled and c in disabled:
-            qchoices.append(questionary.Choice(
-                title=f"{c}  ({disabled[c]})",
-                value=c,
-                disabled=disabled[c],
-            ))
+            qchoices.append(
+                questionary.Choice(
+                    title=f"{c}  ({disabled[c]})",
+                    value=c,
+                    disabled=disabled[c],
+                )
+            )
         else:
             qchoices.append(questionary.Choice(title=c, value=c))
     return questionary.select(

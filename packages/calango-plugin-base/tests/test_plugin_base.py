@@ -13,10 +13,17 @@ class ValidPlugin:
     requires: ClassVar[list[str]] = []
 
     def register(self, app: FastAPI) -> None: ...
-    def migrations(self) -> list[str]: return []
-    def settings(self) -> type[BaseSettings]: return BaseSettings
-    def test_fixtures(self) -> list: return []
-    def context_md(self) -> str: return ""
+    def migrations(self) -> list[str]:
+        return []
+
+    def settings(self) -> type[BaseSettings]:
+        return BaseSettings
+
+    def test_fixtures(self) -> list:
+        return []
+
+    def context_md(self) -> str:
+        return ""
 
 
 class MissingMethodPlugin:

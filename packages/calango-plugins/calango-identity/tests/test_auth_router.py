@@ -30,6 +30,7 @@ def settings():
 @pytest.fixture
 async def client(session: AsyncSession, settings: IdentitySettings):
     app = FastAPI()
+
     # Pass a dependency that yields the test session
     async def get_db():
         yield session
@@ -42,10 +43,13 @@ async def client(session: AsyncSession, settings: IdentitySettings):
 
 async def test_register_returns_201(client):
     """POST /auth/register with valid data returns 201."""
-    response = await client.post("/auth/register", json={
-        "email": "user@example.com",
-        "password": "SecurePassword123!",
-    })
+    response = await client.post(
+        "/auth/register",
+        json={
+            "email": "user@example.com",
+            "password": "SecurePassword123!",
+        },
+    )
     assert response.status_code == 201
     assert response.json()["email"] == "user@example.com"
 
@@ -60,34 +64,44 @@ async def test_register_duplicate_email_returns_400(client):
 
 async def test_login_returns_token(client):
     """POST /auth/jwt/login with valid credentials returns access_token."""
-    await client.post("/auth/register", json={
-        "email": "login@example.com",
-        "password": "SecurePassword123!",
-    })
-    response = await client.post("/auth/jwt/login", data={
-        "username": "login@example.com",
-        "password": "SecurePassword123!",
-    })
+    await client.post(
+        "/auth/register",
+        json={
+            "email": "login@example.com",
+            "password": "SecurePassword123!",
+        },
+    )
+    response = await client.post(
+        "/auth/jwt/login",
+        data={
+            "username": "login@example.com",
+            "password": "SecurePassword123!",
+        },
+    )
     assert response.status_code == 200
     assert "access_token" in response.json()
 
 
 async def test_login_wrong_password_returns_400(client):
     """POST /auth/jwt/login with wrong password returns 400."""
-    await client.post("/auth/register", json={
-        "email": "wrong@example.com",
-        "password": "SecurePassword123!",
-    })
-    response = await client.post("/auth/jwt/login", data={
-        "username": "wrong@example.com",
-        "password": "WrongPassword!",
-    })
+    await client.post(
+        "/auth/register",
+        json={
+            "email": "wrong@example.com",
+            "password": "SecurePassword123!",
+        },
+    )
+    response = await client.post(
+        "/auth/jwt/login",
+        data={
+            "username": "wrong@example.com",
+            "password": "WrongPassword!",
+        },
+    )
     assert response.status_code == 400
 
 
 async def test_forgot_password_returns_202(client):
     """POST /auth/forgot-password returns 202 (always, even for nonexistent email)."""
-    response = await client.post("/auth/forgot-password", json={
-        "email": "nonexistent@example.com"
-    })
+    response = await client.post("/auth/forgot-password", json={"email": "nonexistent@example.com"})
     assert response.status_code == 202

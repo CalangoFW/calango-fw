@@ -25,11 +25,15 @@ def test_get_email_key_returns_email_from_state():
 def test_get_email_key_falls_back_to_ip():
     """get_email_key falls back to IP address when login_email is not on state."""
     state = type("State", (), {})()  # no login_email
-    request = type("Req", (), {
-        "state": state,
-        "client": type("C", (), {"host": "1.2.3.4"})(),
-        "headers": {},
-    })()
+    request = type(
+        "Req",
+        (),
+        {
+            "state": state,
+            "client": type("C", (), {"host": "1.2.3.4"})(),
+            "headers": {},
+        },
+    )()
     key = get_email_key(request)
     # Should return something (IP or similar), not crash
     assert key is not None

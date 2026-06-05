@@ -28,8 +28,6 @@ def configure_engine(settings: CalangoSettings) -> None:
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency: yields an async session per request."""
     if _sessionmaker is None:
-        raise RuntimeError(
-            "Database not configured. Call configure_engine() at startup."
-        )
+        raise RuntimeError("Database not configured. Call configure_engine() at startup.")
     async with _sessionmaker() as session:
         yield session

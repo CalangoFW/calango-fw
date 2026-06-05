@@ -3,51 +3,61 @@ from unittest.mock import patch
 
 def test_is_interactive_false_without_tty():
     from calango_cli import ui
+
     assert ui.is_interactive() is False
 
 
 def test_print_banner_does_not_raise():
     from calango_cli import ui
+
     ui.print_banner()
 
 
 def test_print_banner_with_subtitle_does_not_raise():
     from calango_cli import ui
+
     ui.print_banner("new project")
 
 
 def test_print_success_does_not_raise():
     from calango_cli import ui
+
     ui.print_success("Operation complete")
 
 
 def test_print_success_with_detail_does_not_raise():
     from calango_cli import ui
+
     ui.print_success("Operation complete", detail="Next: do something")
 
 
 def test_print_error_does_not_raise():
     from calango_cli import ui
+
     ui.print_error("Something went wrong")
 
 
 def test_print_error_with_hint_does_not_raise():
     from calango_cli import ui
+
     ui.print_error("Something went wrong", hint="Try: calango new")
 
 
 def test_print_info_does_not_raise():
     from calango_cli import ui
+
     ui.print_info("Creating project — my-api", {"db": "postgres", "ci": "github"})
 
 
 def test_print_file_tree_does_not_raise():
     from calango_cli import ui
+
     ui.print_file_tree("my-project", ["app/main.py", "compose.yml"])
 
 
 def test_print_file_tree_single_file_does_not_raise():
     from calango_cli import ui
+
     ui.print_file_tree("my-project", ["app/main.py"])
 
 
@@ -55,6 +65,7 @@ def test_ask_delegates_to_questionary_text():
     import questionary as _questionary
 
     from calango_cli import ui
+
     with patch("calango_cli.ui.questionary") as mock_q:
         mock_q.text.return_value.unsafe_ask.return_value = "my-answer"
         mock_q.Style = _questionary.Style  # keep real Style constructor
@@ -65,6 +76,7 @@ def test_ask_delegates_to_questionary_text():
 
 def test_ask_choice_delegates_to_questionary_select():
     from calango_cli import ui
+
     with patch("calango_cli.ui.questionary") as mock_q:
         mock_q.Choice.side_effect = lambda title, value, **kw: value
         mock_q.select.return_value.unsafe_ask.return_value = "postgres"
@@ -75,6 +87,7 @@ def test_ask_choice_delegates_to_questionary_select():
 
 def test_ask_choice_marks_disabled_entries():
     from calango_cli import ui
+
     with patch("calango_cli.ui.questionary") as mock_q:
         mock_q.Choice.side_effect = lambda title, value, **kw: value
         mock_q.select.return_value.unsafe_ask.return_value = "postgres"
@@ -92,6 +105,7 @@ def test_ask_choice_marks_disabled_entries():
 
 def test_ask_confirm_delegates_to_questionary_confirm():
     from calango_cli import ui
+
     with patch("calango_cli.ui.questionary") as mock_q:
         mock_q.confirm.return_value.unsafe_ask.return_value = True
         result = ui.ask_confirm("Enable agents?", default=False)

@@ -34,11 +34,7 @@ def require_permission(permission_code: str) -> Any:
     """
 
     async def _check_permission(user: User) -> User:
-        user_perms = {
-            perm.code
-            for role in user.roles
-            for perm in role.permissions
-        }
+        user_perms = {perm.code for role in user.roles for perm in role.permissions}
         if permission_code not in user_perms:
             raise AuthorizationError(f"Permission '{permission_code}' required")
         return user

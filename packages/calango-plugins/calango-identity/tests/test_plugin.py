@@ -61,9 +61,7 @@ def test_include_plugin_works_with_calango():
     from calango import Calango
     from calango.config import CalangoSettings, SecuritySettings
 
-    calango_settings = CalangoSettings(
-        security=SecuritySettings(SECRET_KEY="test-secret")
-    )
+    calango_settings = CalangoSettings(security=SecuritySettings(SECRET_KEY="test-secret"))
     app = Calango(settings=calango_settings)
 
     identity_settings = IdentitySettings(

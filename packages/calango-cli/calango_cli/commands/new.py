@@ -90,11 +90,14 @@ def new(
             disabled={"gitlab": "coming soon"},
         )
     else:
-        print_info(f"Creating project — {name}", {
-            "db": db,
-            "ci": ci,
-            "agents": "enabled" if agents else "disabled",
-        })
+        print_info(
+            f"Creating project — {name}",
+            {
+                "db": db,
+                "ci": ci,
+                "agents": "enabled" if agents else "disabled",
+            },
+        )
 
     project_dir = path / name
 
