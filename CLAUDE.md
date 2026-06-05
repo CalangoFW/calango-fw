@@ -132,6 +132,26 @@ my-project/
 
 ## Code conventions — follow strictly
 
+### Quality loop — run on every change
+
+Treat the linter and type checker like the test suite: run them after **every**
+code modification, not just before committing. The same three gates the CI
+enforces must pass locally before you consider any change done:
+
+```bash
+uv run ruff check .            # lint — must report "All checks passed!"
+uv run ruff format --check .   # format — must report all files formatted
+uv run ty check packages/      # types — must report "All checks passed!"
+uv run pytest packages/        # tests — must be green
+```
+
+Fix issues at the source. Use `# ty: ignore[rule]` (not `# type: ignore`) **only**
+for genuine type-checker limitations — pydantic-settings env loading, SQLAlchemy
+dynamic attributes, Starlette handler variance, or tests that pass invalid types
+on purpose — and always with a one-line comment explaining why. Never silence a
+real bug with an ignore. The pre-commit hooks run all four gates; keep them
+installed (`uvx pre-commit install`) so nothing reaches CI unchecked.
+
 ### Naming
 
 ```python
