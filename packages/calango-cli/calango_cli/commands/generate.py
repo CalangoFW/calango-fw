@@ -76,6 +76,7 @@ def resource(
     if not name[0].isupper():
         print_error(
             f"Resource name must be PascalCase (e.g. 'Order', not '{name}').",
+            hint="Example: calango generate resource Order",
         )
         raise typer.Exit(1)
 

@@ -97,7 +97,10 @@ def new(
     project_dir = path / name
 
     if project_dir.exists():
-        print_error(f"Directory '{project_dir}' already exists.")
+        print_error(
+            f"Directory '{project_dir}' already exists.",
+            hint="Choose a different name or remove the existing directory.",
+        )
         raise typer.Exit(1)
 
     if db not in _SUPPORTED_DB:
