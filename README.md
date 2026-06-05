@@ -46,7 +46,7 @@ In under two minutes you get a project with database, cache, storage, CI/CD, `CL
 
 ## Why Calango?
 
-### For the Python developer of 2025
+### For the Python developer
 
 Python dominates AI and ML. FastAPI dominates APIs. But no Python framework treats **AI-assisted development** as a design principle — or makes **TDD the path of least resistance**.
 
