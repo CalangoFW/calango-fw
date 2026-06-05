@@ -6,11 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from calango.core.database import get_db
-from app.repositories.{{ resource_snake }} import {{ resource_name }}Repository
-from app.services.{{ resource_snake }} import {{ resource_name }}Service
-from app.schemas.{{ resource_snake }} import (
+from app.contexts.{{ context_snake }} import (
     {{ resource_name }}Input,
     {{ resource_name }}Output,
+    {{ resource_name }}Repository,
+    {{ resource_name }}Service,
     {{ resource_name }}Update,
 )
 

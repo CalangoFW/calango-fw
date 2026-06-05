@@ -3,8 +3,8 @@ from __future__ import annotations
 import uuid
 
 from calango.service import BaseService
-from app.repositories.{{ resource_snake }} import {{ resource_name }}Repository
-from app.schemas.{{ resource_snake }} import (
+from app.contexts.{{ context_snake }}.repositories.{{ resource_snake }} import {{ resource_name }}Repository
+from app.contexts.{{ context_snake }}.schemas.{{ resource_snake }} import (
     {{ resource_name }}Input,
     {{ resource_name }}Output,
     {{ resource_name }}Update,
