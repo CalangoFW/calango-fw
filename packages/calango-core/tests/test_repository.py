@@ -6,8 +6,9 @@ import pytest
 from pydantic import BaseModel
 from sqlalchemy import String
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
 
+from calango.db import Base
 from calango.repository import BaseRepository
 
 # ---------------------------------------------------------------------------
@@ -15,14 +16,9 @@ from calango.repository import BaseRepository
 # ---------------------------------------------------------------------------
 
 
-class Base(DeclarativeBase):
-    pass
-
-
 class Item(Base):
-    __tablename__ = "items"
+    __tablename__ = "repo_items"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     name: Mapped[str] = mapped_column(String(100))
 
 
