@@ -1,11 +1,13 @@
 import typer
 
+from calango_cli.commands.check import check_security
 from calango_cli.commands.generate import app as generate_app
 from calango_cli.commands.new import new
 from calango_cli.ui import print_banner
 
 app = typer.Typer(name="calango", help="The fast, friendly Python web framework CLI.")
 app.command("new")(new)
+app.command("check:security")(check_security)
 app.add_typer(generate_app, name="generate")
 
 
