@@ -252,6 +252,23 @@ async def health_check():
 - **OWASP LLM:2025** — prompt injection, excessive agency, unbounded consumption
 - **Security test cases generated** — every resource gets 401, 403, and BOLA tests by default
 
+**Static security gate — ships today.** The framework and every generated project
+run a free, OSS, three-layer scan that blocks the build on known issues:
+
+```bash
+calango check:security      # SCA (pip-audit) + SAST (Opengrep) — also a CI gate
+```
+
+| Layer | Tool | Catches |
+|---|---|---|
+| SAST inline | Ruff `S` (flake8-bandit) | insecure patterns as you lint |
+| SAST deep | Opengrep | dataflow + Calango's own `CL0xx` rules (raw SQL, PII in logs) |
+| SCA | pip-audit (PyPA) | known CVEs in dependencies |
+
+All three run *as tools*, never imported into your app — so no copyleft touches
+your code. (An in-app runtime firewall is intentionally left as an opt-in: the
+mature options are AGPL/NonCommercial.)
+
 ### ⚡ Proactive performance detection
 
 ```bash
