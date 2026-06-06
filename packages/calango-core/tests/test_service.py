@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from pydantic import BaseModel
 from sqlalchemy import String
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
 
+from calango.db import Base
 from calango.repository import BaseRepository
 from calango.service import BaseService
 
@@ -16,19 +17,14 @@ from calango.service import BaseService
 # ---------------------------------------------------------------------------
 
 
-class Base(DeclarativeBase):
-    pass
-
-
 class Item(Base):
-    __tablename__ = "items"
+    __tablename__ = "svc_items"
 
-    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid4()))
     name: Mapped[str] = mapped_column(String(100))
 
 
 class ItemCreate(BaseModel):
-    id: str
+    id: UUID
     name: str
 
 
@@ -92,10 +88,9 @@ class TestBaseService:
         self, service: ItemService, repo: ItemRepository
     ) -> None:
         """A concrete service subclass can call repository CRUD methods."""
-        data = ItemCreate(id=str(uuid4()), name="Widget")
+        data = ItemCreate(id=uuid4(), name="Widget")
         item = await repo.create(data)
-        # Test model uses a str primary key for SQLite; get() is typed for UUID.
-        fetched = await service.repository.get(item.id)  # ty: ignore[invalid-argument-type]
+        fetched = await service.repository.get(item.id)
         assert fetched is not None
         assert fetched.name == "Widget"
 

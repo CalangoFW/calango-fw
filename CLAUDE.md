@@ -181,8 +181,9 @@ Apache-2.0) and a Zen opt-in plugin are possible future additions.
 # CLI: calango generate resource Shop.Order
 # Directory: app/contexts/shop/
 
-# Models — PascalCase, no suffix
-class Order(Base): ...
+# Models — PascalCase, no suffix; inherit the canonical Base
+from calango.db import Base
+class Order(Base): ...   # id, created_at, updated_at are inherited from Base
 
 # Schemas — PascalCase + mandatory suffix
 class OrderInput(CalangoModel): ...
@@ -844,20 +845,19 @@ calango setup:agile [--tool=linear|jira|github]
 - [x] `calango-cli`: `calango new` + `calango generate resource` (Phoenix-style contexts)
 - [x] `calango-cli`: `calango check:security` — SCA (pip-audit) + SAST (Opengrep) gate
 - [x] Security: SAST/SCA blocking CI job + seed `CL0xx` Opengrep rules, in framework and generated projects
+- [x] `calango-core`: `BaseRepository[T: Base]` + `BaseService` (SQLAlchemy 2 async)
+- [x] `calango-core`: canonical `calango.db.Base` (id + timestamps) + `import_models()` discovery
+- [x] `calango-cli`: `calango db` — revision (autogenerate), migrate, rollback, seed
 
 ## What to implement next (in this order)
 
-1. `BaseRepository[T]` — SQLAlchemy 2 async with session via DI
-2. `BaseService[R]` — repository injection
-3. `calango new` CLI command — generates 20 complete artifacts
-4. `calango generate resource` — generates the 8 resource files with tests
-5. `calango db migrate` — Alembic wrapper
-6. `calango-identity` plugin — FastAPI-Users base + JWT RS256 + RBAC
-7. `calango-multitenancy` plugin — Postgres RLS
-8. `calango-agents` plugin — Agno + AgentRouter + Tool Registry + MCP Server
-9. `calango check:security` — pre-deploy audit
-10. `calango db suggest-indexes` — missing index detection
-11. `calango-payments` plugin — Stripe + MercadoPago
+1. `calango-identity` — finish refresh-token rotation (core auth/RBAC/rate-limit already done)
+2. `calango-multitenancy` plugin — Postgres RLS
+3. `calango-payments` plugin — Stripe + MercadoPago/Pix
+4. `calango-agents` plugin — Agno + AgentRouter + Tool Registry + MCP Server
+5. `calango db suggest-indexes` — missing index detection (deferred from Phase 5)
+6. `calango context` — auto-regenerate CLAUDE.md
+7. Remaining `CL0xx` Opengrep rules (CL001–CL032) with fixtures
 
 ---
 

@@ -1,0 +1,14 @@
+from __future__ import annotations
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+
+async def seed(session: AsyncSession) -> None:
+    """Seed example data. Runs inside a transaction; make it idempotent.
+
+    Example:
+        from app.contexts.shop import OrderRepository
+        repo = OrderRepository(session)
+        ...
+    """
+    # TODO: insert your seed data here

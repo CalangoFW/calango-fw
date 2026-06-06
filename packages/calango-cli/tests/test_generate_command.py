@@ -435,3 +435,11 @@ def test_generate_resource_wizard_validates_format(tmp_path):
     ):
         result = runner.invoke(app, ["generate", "resource", "--path", str(tmp_path)])
     assert result.exit_code == 1
+
+
+def test_generate_model_inherits_calango_base(tmp_path):
+    _make_project(tmp_path)
+    runner.invoke(app, ["generate", "resource", "Shop.Order", "--path", str(tmp_path)])
+    content = (tmp_path / "app" / "contexts" / "shop" / "models" / "order.py").read_text()
+    assert "from calango.db import Base" in content
+    assert "class Base(DeclarativeBase)" not in content

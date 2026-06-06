@@ -394,3 +394,17 @@ def test_new_ci_forces_node24(tmp_path):
     runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
     ci = (tmp_path / "my-api" / ".github" / "workflows" / "ci.yml").read_text()
     assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24" in ci
+
+
+def test_new_alembic_env_wires_target_metadata(tmp_path):
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    env = (tmp_path / "my-api" / "alembic" / "env.py").read_text()
+    assert "from calango.db import Base, import_models" in env
+    assert "target_metadata = Base.metadata" in env
+
+
+def test_new_creates_seeds_example(tmp_path):
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    example = tmp_path / "my-api" / "app" / "seeds" / "001_example.py"
+    assert example.exists()
+    assert "async def seed(session" in example.read_text()

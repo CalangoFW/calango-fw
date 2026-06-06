@@ -7,8 +7,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from calango.db import Base
 
-class BaseRepository[T]:
+
+class BaseRepository[T: Base]:
     """
     Generic async SQLAlchemy 2 repository.
 
@@ -61,11 +63,7 @@ class BaseRepository[T]:
     async def get_for_update(self, record_id: UUID) -> T | None:
         """Fetch with SELECT FOR UPDATE (pessimistic lock)."""
         result = await self.session.execute(
-            select(self.model)
-            # SQLAlchemy declarative models expose `id`, but the generic T can't
-            # carry that. ty has no SQLAlchemy plugin, so the attribute is opaque.
-            .where(self.model.id == record_id)  # ty: ignore[unresolved-attribute]
-            .with_for_update()
+            select(self.model).where(self.model.id == record_id).with_for_update()
         )
         return result.scalar_one_or_none()
 
