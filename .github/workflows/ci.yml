@@ -61,9 +61,9 @@ jobs:
             | grep -v '^-e' \
             | uv run pip-audit -r /dev/stdin
 
-      - name: Install Opengrep
+      - name: Install Opengrep (pinned for reproducible scans)
         run: |
-          curl -fsSL https://raw.githubusercontent.com/opengrep/opengrep/main/install.sh | bash
+          curl -fsSL https://raw.githubusercontent.com/opengrep/opengrep/main/install.sh | bash -s -- -v v1.22.0
           echo "$HOME/.opengrep/cli/latest" >> "$GITHUB_PATH"
 
       - name: SAST — Opengrep (block on findings)
