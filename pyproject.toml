@@ -17,6 +17,7 @@ dev = [
     "pytest-cov>=7.1.0",
     "aiosqlite>=0.22.1",
     "fakeredis>=2.26",
+    "pip-audit>=2.7",
 ]
 
 [tool.pytest.ini_options]

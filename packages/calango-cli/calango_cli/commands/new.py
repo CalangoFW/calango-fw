@@ -22,6 +22,7 @@ _TEMPLATE_FILES = [
     ("app/core/config.py.jinja", "app/core/config.py"),
     ("app/contexts/.gitkeep.jinja", "app/contexts/.gitkeep"),
     ("app/routers/.gitkeep.jinja", "app/routers/.gitkeep"),
+    ("security/opengrep/calango.yml.jinja", "security/opengrep/calango.yml"),
     ("tests/__init__.py.jinja", "tests/__init__.py"),
     ("tests/conftest.py.jinja", "tests/conftest.py"),
     ("alembic/env.py.jinja", "alembic/env.py"),

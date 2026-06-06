@@ -182,6 +182,7 @@ calango new my-api --db=postgres --ci=github --agents
 # ✓ CLAUDE.md for Claude Code, .cursorrules for Cursor
 # ✓ Git initialized with Conventional Commits enforced
 # ✓ pyproject.toml with 80% coverage gate
+# ✓ SAST + SCA security gate (Ruff S + Opengrep + pip-audit)
 ```
 
 ### 🧪 TDD as the path of least resistance
@@ -250,6 +251,23 @@ async def health_check():
 - **OWASP API Security:2023** — BOLA, mass assignment, rate limiting by default
 - **OWASP LLM:2025** — prompt injection, excessive agency, unbounded consumption
 - **Security test cases generated** — every resource gets 401, 403, and BOLA tests by default
+
+**Static security gate — ships today.** The framework and every generated project
+run a free, OSS, three-layer scan that blocks the build on known issues:
+
+```bash
+calango check:security      # SCA (pip-audit) + SAST (Opengrep) — also a CI gate
+```
+
+| Layer | Tool | Catches |
+|---|---|---|
+| SAST inline | Ruff `S` (flake8-bandit) | insecure patterns as you lint |
+| SAST deep | Opengrep | dataflow + Calango's own `CL0xx` rules (raw SQL, PII in logs) |
+| SCA | pip-audit (PyPA) | known CVEs in dependencies |
+
+All three run *as tools*, never imported into your app — so no copyleft touches
+your code. (An in-app runtime firewall is intentionally left as an opt-in: the
+mature options are AGPL/NonCommercial.)
 
 ### ⚡ Proactive performance detection
 
@@ -396,6 +414,7 @@ See [ROADMAP.md](ROADMAP.md) for the full breakdown.
 | `calango-core` — app factory, middleware, handlers | ✅ Done (10 tests) |
 | `calango-cli` — `calango new` | ✅ Done |
 | `calango-cli` — `calango generate resource` | ✅ Done (scaffold; no DB layer yet) |
+| `calango-cli` — `calango check:security` (SAST + SCA) | ✅ Done |
 | `calango-core` — `BaseRepository` + `BaseService` | 🟡 Next |
 | `calango-identity` | 🔴 Planned |
 | `calango-agents` | 🔴 Planned |
