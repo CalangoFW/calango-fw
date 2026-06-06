@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import importlib.util
 import shutil
 import subprocess
 from pathlib import Path
@@ -67,3 +69,49 @@ def rollback(
     if code == 0:
         print_success(f"Rolled back {step} migration(s).")
     raise typer.Exit(code)
+
+
+def _discover_seeds(project: Path) -> list[Path]:
+    seeds_dir = project / "app" / "seeds"
+    if not seeds_dir.exists():
+        return []
+    return sorted(p for p in seeds_dir.glob("[0-9]*_*.py") if p.is_file())
+
+
+async def _run_seeds(project: Path, seeds: list[Path]) -> None:
+    import sys
+
+    sys.path.insert(0, str(project))
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    config_mod = importlib.import_module("app.core.config")
+    settings = config_mod.Settings()
+    engine = create_async_engine(settings.database.URL)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        for seed_file in seeds:
+            spec = importlib.util.spec_from_file_location(seed_file.stem, seed_file)
+            if spec is None or spec.loader is None:
+                continue
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            async with maker() as session, session.begin():
+                await module.seed(session)
+    finally:
+        await engine.dispose()
+
+
+@db_app.command("seed")
+def seed(path: Path = typer.Option(Path("."), "--path", help="Project root")) -> None:
+    """Run app/seeds/ modules in filename order, each in its own transaction."""
+    project = path.resolve()
+    if not (project / "app" / "seeds").exists():
+        print_error(
+            "No app/seeds/ directory found.",
+            hint="Add ordered seed modules like app/seeds/001_example.py.",
+        )
+        raise typer.Exit(1)
+    seeds = _discover_seeds(project)
+    print_info("Seeding", {"modules": str(len(seeds))})
+    asyncio.run(_run_seeds(project, seeds))
+    print_success(f"Ran {len(seeds)} seed module(s).")

@@ -56,3 +56,22 @@ def test_db_migrate_propagates_alembic_failure(tmp_path):
         run.return_value = MagicMock(returncode=1)
         result = runner.invoke(app, ["db", "migrate", "--path", str(tmp_path)])
     assert result.exit_code == 1
+
+
+def test_discover_seeds_sorts_by_name(tmp_path):
+    from calango_cli.commands.db import _discover_seeds
+
+    seeds = tmp_path / "app" / "seeds"
+    seeds.mkdir(parents=True)
+    (seeds / "__init__.py").write_text("")
+    (seeds / "002_b.py").write_text("async def seed(session): ...\n")
+    (seeds / "001_a.py").write_text("async def seed(session): ...\n")
+    names = [p.name for p in _discover_seeds(tmp_path)]
+    assert names == ["001_a.py", "002_b.py"]
+
+
+def test_db_seed_without_seeds_dir_exits_1(tmp_path):
+    (tmp_path / "alembic.ini").write_text("[alembic]\n")
+    (tmp_path / "app").mkdir()
+    result = runner.invoke(app, ["db", "seed", "--path", str(tmp_path)])
+    assert result.exit_code == 1
