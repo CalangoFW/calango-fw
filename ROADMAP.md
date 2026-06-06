@@ -364,7 +364,7 @@ calango db suggest-indexes  # analyzes pg_stat_statements, suggests + generates 
 
 ### Phase 13: DX and documentation
 - `calango context` — auto-regenerates CLAUDE.md
-- `calango check:security` — pre-deploy audit
+- ✅ `calango check:security` — SAST (Opengrep) + SCA (pip-audit) gate, in framework and generated projects
 - MkDocs Material — published documentation
 
 ---

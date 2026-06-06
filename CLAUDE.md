@@ -139,18 +139,40 @@ code modification, not just before committing. The same three gates the CI
 enforces must pass locally before you consider any change done:
 
 ```bash
-uv run ruff check .            # lint — must report "All checks passed!"
+uv run ruff check .            # lint + SAST (Ruff S) — must report "All checks passed!"
 uv run ruff format --check .   # format — must report all files formatted
 uv run ty check packages/      # types — must report "All checks passed!"
 uv run pytest packages/        # tests — must be green
+calango check:security         # SCA (pip-audit) + SAST (Opengrep) — no findings
 ```
 
 Fix issues at the source. Use `# ty: ignore[rule]` (not `# type: ignore`) **only**
 for genuine type-checker limitations — pydantic-settings env loading, SQLAlchemy
 dynamic attributes, Starlette handler variance, or tests that pass invalid types
 on purpose — and always with a one-line comment explaining why. Never silence a
-real bug with an ignore. The pre-commit hooks run all four gates; keep them
+real bug with an ignore. The pre-commit hooks run the quality gates; keep them
 installed (`uvx pre-commit install`) so nothing reaches CI unchecked.
+
+### Security tooling — SAST + SCA by default
+
+The framework and every generated project ship a three-layer static security gate,
+all of it free, OSS, and run **as tools** (never imported into the app — so no
+license copyleft touches user code):
+
+| Layer | Tool | License | Where |
+|---|---|---|---|
+| SAST inline | Ruff `S` (flake8-bandit) | MIT | every `ruff check` |
+| SAST deep + custom rules | Opengrep (Semgrep fork) | LGPL-2.1 | CI `security` job, `check:security` |
+| SCA (dependency CVEs) | pip-audit (PyPA) | Apache-2.0 | CI `security` job, `check:security` |
+
+The CI `security` job **blocks** on a known CVE with a fix (pip-audit) or any
+high-severity Opengrep finding. Calango's own rules (CL040 raw SQL, CL050 PII in
+log; more to come) live in `security/opengrep/calango.yml` — these are the
+**Opengrep implementation** of the custom `CL0xx` rules, since Ruff has no custom-rule
+support. Runtime defense is by design (middleware, validation, rate limit, ownership
+checks), not a shipped dependency: in-app RASP options were rejected as defaults
+(Aikido Zen is AGPL-3.0, PyRASP is CC-BY-NC NonCommercial). An edge WAF (OWASP Coraza,
+Apache-2.0) and a Zen opt-in plugin are possible future additions.
 
 ### Naming
 
@@ -557,20 +579,29 @@ async def create_admin_user(...):
 - LLM06 Excessive Agency → `requires_approval` for destructive actions
 - LLM10 Unbounded Consumption → token budget via Plans plugin
 
-### Calango custom Ruff rules
+### Calango custom security rules (Opengrep)
+
+Ruff has no custom-rule support, so Calango's own `CL0xx` rules are authored as
+Opengrep YAML in `security/opengrep/calango.yml`. Shipped so far: **CL040** and
+**CL050**. The rest below are planned — add each as an Opengrep rule with a test
+fixture proving it fires, and confirm it does not false-positive on `packages/`.
 
 ```
 CL001: Use 'httpx.AsyncClient' instead of 'requests' in async context
 CL002: Use 'aiofiles.open' instead of 'open' in async context
 CL003: Blocking call inside coroutine
+CL010: CPU-bound handler — consider background job
 CL020: HTTP call to dynamic URL — validate against allowlist
 CL030: Hardcoded secret detected
 CL031: Weak hash algorithm
 CL032: 'random' module used for security
-CL040: Raw SQL string interpolation
-CL050: Potential PII in log statement
-CL010: CPU-bound handler — consider background job
+CL040: Raw SQL string interpolation                 ✅ shipped
+CL050: Potential PII in log statement               ✅ shipped
 ```
+
+(Note: hardcoded-secret/weak-hash/random-for-security overlap with Ruff `S` rules
+already enabled — prefer Ruff `S` where it covers the case, reserve `CL0xx` for
+Calango-specific patterns Ruff can't express.)
 
 ---
 
@@ -810,7 +841,9 @@ calango setup:agile [--tool=linear|jira|github]
 - [x] `calango-core`: `Calango(FastAPI)` app factory
 - [x] `calango-core`: `CalangoMiddleware` (request_id, security headers, structured logs)
 - [x] `calango-core`: global exception handlers (never expose stack trace in production)
-- [x] 54 tests passing · 97% coverage (calango-core)
+- [x] `calango-cli`: `calango new` + `calango generate resource` (Phoenix-style contexts)
+- [x] `calango-cli`: `calango check:security` — SCA (pip-audit) + SAST (Opengrep) gate
+- [x] Security: SAST/SCA blocking CI job + seed `CL0xx` Opengrep rules, in framework and generated projects
 
 ## What to implement next (in this order)
 

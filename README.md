@@ -182,6 +182,7 @@ calango new my-api --db=postgres --ci=github --agents
 # ✓ CLAUDE.md for Claude Code, .cursorrules for Cursor
 # ✓ Git initialized with Conventional Commits enforced
 # ✓ pyproject.toml with 80% coverage gate
+# ✓ SAST + SCA security gate (Ruff S + Opengrep + pip-audit)
 ```
 
 ### 🧪 TDD as the path of least resistance
@@ -396,6 +397,7 @@ See [ROADMAP.md](ROADMAP.md) for the full breakdown.
 | `calango-core` — app factory, middleware, handlers | ✅ Done (10 tests) |
 | `calango-cli` — `calango new` | ✅ Done |
 | `calango-cli` — `calango generate resource` | ✅ Done (scaffold; no DB layer yet) |
+| `calango-cli` — `calango check:security` (SAST + SCA) | ✅ Done |
 | `calango-core` — `BaseRepository` + `BaseService` | 🟡 Next |
 | `calango-identity` | 🔴 Planned |
 | `calango-agents` | 🔴 Planned |
