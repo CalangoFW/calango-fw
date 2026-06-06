@@ -242,7 +242,7 @@ packages/calango-cli/
 
 ## M2 — "generate resource"
 
-### Phase 3: calango-core — BaseRepository + BaseService
+### Phase 3: calango-core — BaseRepository + BaseService ✅ Done
 
 `packages/calango-core/calango/repository/__init__.py`
 
@@ -268,7 +268,7 @@ class BaseService(Generic[R]):
 
 Includes: session DI factory (`get_db`), test utilities (`test_db_session`).
 
-### Phase 4: calango-cli — generate resource
+### Phase 4: calango-cli — generate resource ✅ Done
 
 `calango generate resource <Context.Name>` generates 9 files (Phoenix-style contexts):
 
@@ -284,7 +284,7 @@ Includes: session DI factory (`get_db`), test utilities (`test_db_session`).
 
 Pre-commit hook `calango-no-untested-resource`: fails if `app/contexts/<ctx>/services/X.py` exists without `tests/unit/<ctx>/test_X_service.py`.
 
-### Phase 5: calango-cli — db commands
+### Phase 5: calango-cli — db commands 🟡 Next
 
 ```bash
 calango db migrate          # wrapper: uv run alembic upgrade head
@@ -297,7 +297,7 @@ calango db suggest-indexes  # analyzes pg_stat_statements, suggests + generates 
 
 ## M3 — "minimal SaaS"
 
-### Phase 6: calango-identity
+### Phase 6: calango-identity 🟡 Mostly done — refresh-token rotation pending
 
 `packages/calango-plugins/calango-identity/`
 
