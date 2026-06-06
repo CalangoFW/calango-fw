@@ -398,7 +398,7 @@ my-project/
 | Milestone | What it delivers | Status |
 |---|---|---|
 | **M1** "calango new works" | Core + CLI scaffold | 🟢 Done |
-| **M2** "generate resource" | Full CRUD scaffold with real database | 🟡 In progress |
+| **M2** "generate resource" | Full CRUD scaffold with real database | 🟢 Done |
 | **M3** "minimal SaaS" | JWT auth + RBAC + protected endpoints | 🟡 In progress |
 | **M4** "SaaS core" | Multi-tenancy (RLS) + payments (Stripe + Pix) | 🔴 Planned |
 | **M5** "AI layer" | `calango generate agent` → running agent with MCP | 🔴 Planned |
@@ -416,7 +416,7 @@ See [ROADMAP.md](ROADMAP.md) for the full breakdown.
 | `calango-cli` — `calango generate resource` | ✅ Done (scaffold; no DB layer yet) |
 | `calango-cli` — `calango check:security` (SAST + SCA) | ✅ Done |
 | `calango-core` — `BaseRepository` + `BaseService` | ✅ Done |
-| `calango-cli` — `calango db migrate` | 🟡 Next |
+| `calango-cli` — `calango db` (revision/migrate/rollback/seed) | ✅ Done |
 | `calango-identity` — JWT RS256, RBAC, rate limit | 🟡 Mostly done (refresh rotation pending) |
 | `calango-agents` | 🔴 Planned |
 | `calango-payments` | 🔴 Planned |

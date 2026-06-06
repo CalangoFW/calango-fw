@@ -284,7 +284,7 @@ Includes: session DI factory (`get_db`), test utilities (`test_db_session`).
 
 Pre-commit hook `calango-no-untested-resource`: fails if `app/contexts/<ctx>/services/X.py` exists without `tests/unit/<ctx>/test_X_service.py`.
 
-### Phase 5: calango-cli — db commands 🟡 Next
+### Phase 5: calango-cli — db commands ✅ Done (suggest-indexes deferred)
 
 ```bash
 calango db migrate          # wrapper: uv run alembic upgrade head
