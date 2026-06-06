@@ -363,3 +363,34 @@ def test_new_creates_routers_dir(tmp_path):
     """calango new creates app/routers/ directory."""
     runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
     assert (tmp_path / "my-api" / "app" / "routers").is_dir()
+
+
+def test_new_creates_opengrep_rules(tmp_path):
+    """calango new ships the Calango Opengrep ruleset."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    rules = tmp_path / "my-api" / "security" / "opengrep" / "calango.yml"
+    assert rules.exists()
+    assert "cl040-raw-sql-string-interpolation" in rules.read_text()
+
+
+def test_new_pyproject_has_pip_audit(tmp_path):
+    """Generated pyproject includes pip-audit as a dev dependency."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    content = (tmp_path / "my-api" / "pyproject.toml").read_text()
+    assert "pip-audit" in content
+
+
+def test_new_ci_has_security_job(tmp_path):
+    """Generated CI has a security job running pip-audit and Opengrep."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    ci = (tmp_path / "my-api" / ".github" / "workflows" / "ci.yml").read_text()
+    assert "Security (SAST + SCA)" in ci
+    assert "pip-audit" in ci
+    assert "opengrep" in ci.lower()
+
+
+def test_new_ci_forces_node24(tmp_path):
+    """Generated CI opts every action into Node.js 24 (CLAUDE.md rule)."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    ci = (tmp_path / "my-api" / ".github" / "workflows" / "ci.yml").read_text()
+    assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24" in ci
