@@ -37,6 +37,38 @@ jobs:
         run: uv run ty check packages/
         continue-on-error: true  # ty is pre-release — não bloqueia CI ainda
 
+  security:
+    name: Security (SAST + SCA)
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: SCA — pip-audit (block on known CVEs with a fix)
+        run: |
+          uv export --format requirements-txt --no-emit-workspace --no-hashes --no-dev \
+            | grep -v '^-e' \
+            | uv run pip-audit -r /dev/stdin
+
+      - name: Install Opengrep
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/opengrep/opengrep/main/install.sh | bash
+          echo "$HOME/.opengrep/cli/latest" >> "$GITHUB_PATH"
+
+      - name: SAST — Opengrep (block on findings)
+        run: opengrep scan --config security/opengrep/ --error packages/
+
   test:
     name: Tests
     runs-on: ubuntu-latest

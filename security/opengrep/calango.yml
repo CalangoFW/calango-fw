@@ -1,0 +1,52 @@
+rules:
+  - id: cl040-raw-sql-string-interpolation
+    languages: [python]
+    severity: ERROR
+    message: >
+      CL040: Raw SQL built with string interpolation — SQL injection risk.
+      Use SQLAlchemy constructs or bound parameters instead of f-strings/`.format()`/`%`/`+`.
+    metadata:
+      category: security
+      cwe: "CWE-89: SQL Injection"
+      owasp: "A03:2021 - Injection"
+      references:
+        - https://owasp.org/Top10/A03_2021-Injection/
+    patterns:
+      - pattern-either:
+          # session.execute(f"... {x} ...")
+          - patterns:
+              - pattern: $SESSION.execute(f"...")
+              - metavariable-pattern:
+                  metavariable: $SESSION
+                  patterns:
+                    - pattern-not: text("...")
+          - pattern: $SESSION.execute("..." % ...)
+          - pattern: $SESSION.execute("...".format(...))
+          - pattern: $SESSION.execute("..." + ...)
+          # text("... {x} ...") with an f-string passed to SQLAlchemy text()
+          - pattern: text(f"...")
+          - pattern: text("..." % ...)
+          - pattern: text("...".format(...))
+
+  - id: cl050-pii-in-log
+    languages: [python]
+    severity: WARNING
+    message: >
+      CL050: Possible PII/credential in a log statement. Never log passwords, tokens,
+      secrets, or raw emails. Log identifiers (user_id) instead of personal data.
+    metadata:
+      category: security
+      cwe: "CWE-532: Insertion of Sensitive Information into Log File"
+      owasp: "A09:2021 - Security Logging and Monitoring Failures"
+    patterns:
+      - pattern-either:
+          - pattern: $LOG.$LEVEL(..., password=..., ...)
+          - pattern: $LOG.$LEVEL(..., token=..., ...)
+          - pattern: $LOG.$LEVEL(..., secret=..., ...)
+          - pattern: $LOG.$LEVEL(f"...{$OBJ.password}...")
+          - pattern: $LOG.$LEVEL(f"...{$OBJ.token}...")
+          - pattern: $LOG.$LEVEL(f"...{$OBJ.email}...")
+          - pattern: $LOG.$LEVEL(f"...password=...")
+      - metavariable-regex:
+          metavariable: $LEVEL
+          regex: ^(debug|info|warning|warn|error|exception|critical|log)$
