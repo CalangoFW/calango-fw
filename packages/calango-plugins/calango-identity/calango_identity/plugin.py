@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings
 from slowapi.errors import RateLimitExceeded
 
 from calango_identity.rate_limit import make_limiter
-from calango_identity.refresh_tokens import RedisRefreshTokenStore
+from calango_identity.refresh_tokens import RedisRefreshTokenStore, RefreshTokenStore
 from calango_identity.router import make_auth_router
 from calango_identity.settings import IdentitySettings
 
@@ -33,17 +33,24 @@ class IdentityPlugin:
     version = "0.1.0"
     requires: ClassVar[list[str]] = ["calango-core>=0.1.0", "calango-plugin-base>=0.1.0"]
 
-    def __init__(self, settings: IdentitySettings | None = None) -> None:
+    def __init__(
+        self,
+        settings: IdentitySettings | None = None,
+        refresh_store: RefreshTokenStore | None = None,
+    ) -> None:
         # pydantic-settings populates PRIVATE_KEY/PUBLIC_KEY from env at runtime;
         # ty has no pydantic plugin so it sees them as missing required args.
         self._settings = settings or IdentitySettings()  # ty: ignore[missing-argument]
         self._limiter = make_limiter(self._settings.REDIS_URL)
-        client = redis.from_url(self._settings.REDIS_URL, decode_responses=True)
-        self.refresh_store = RedisRefreshTokenStore(
-            client,
-            lifetime=timedelta(days=self._settings.REFRESH_TOKEN_EXPIRE_DAYS),
-            key_prefix=self._settings.REFRESH_TOKEN_KEY_PREFIX,
-        )
+        if refresh_store is not None:
+            self.refresh_store = refresh_store
+        else:
+            client = redis.from_url(self._settings.REDIS_URL, decode_responses=True)
+            self.refresh_store = RedisRefreshTokenStore(
+                client,
+                lifetime=timedelta(days=self._settings.REFRESH_TOKEN_EXPIRE_DAYS),
+                key_prefix=self._settings.REFRESH_TOKEN_KEY_PREFIX,
+            )
 
     def register(self, app: FastAPI) -> None:
         """Register auth routers, rate limiter, and exception handler."""
@@ -92,7 +99,9 @@ Patterns:
 - `user: User = require_permission("resource:action")` — RBAC check
 
 Auth endpoints (registered automatically):
-  POST /auth/jwt/login          — returns access_token
+  POST /auth/login              — returns access and refresh tokens
+  POST /auth/refresh            — rotates a refresh token
+  POST /auth/logout             — revokes a refresh-token family
   POST /auth/register           — create account
   POST /auth/forgot-password    — initiate password reset
   POST /auth/reset-password     — apply reset token

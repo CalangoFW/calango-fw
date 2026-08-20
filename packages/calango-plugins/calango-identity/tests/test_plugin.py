@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 from calango_identity.plugin import IdentityPlugin
+from calango_identity.refresh_tokens import InMemoryRefreshTokenStore, RedisRefreshTokenStore
 from calango_identity.settings import IdentitySettings
 from calango_plugin_base import PluginBase
 from fastapi import FastAPI
@@ -54,6 +55,38 @@ def test_identity_plugin_register_adds_auth_routes(settings):
 
     routes = [getattr(r, "path", "") for r in app.routes]
     assert any("/auth" in r for r in routes)
+
+
+def test_identity_plugin_uses_injected_refresh_store_for_session_routes(settings):
+    """An injected store backs the login, refresh, and logout routes."""
+    refresh_store = InMemoryRefreshTokenStore()
+    app = FastAPI()
+
+    plugin = IdentityPlugin(settings=settings, refresh_store=refresh_store)
+    plugin.register(app)
+
+    assert plugin.refresh_store is refresh_store
+    routes = {getattr(route, "path", "") for route in app.routes}
+    assert {"/auth/login", "/auth/refresh", "/auth/logout"} <= routes
+
+
+def test_identity_plugin_builds_redis_store_from_settings(monkeypatch, settings):
+    """The production default configures Redis refresh-token persistence."""
+    sentinel = object()
+    monkeypatch.setattr("calango_identity.plugin.redis.from_url", lambda *args, **kwargs: sentinel)
+
+    plugin = IdentityPlugin(settings=settings)
+
+    assert isinstance(plugin.refresh_store, RedisRefreshTokenStore)
+    assert plugin.refresh_store.redis is sentinel
+
+
+def test_package_exports_redis_refresh_store_interfaces():
+    """Applications can import the stable production refresh-store interfaces."""
+    from calango_identity import RedisRefreshTokenStore, RefreshTokenStore
+
+    assert RefreshTokenStore.__name__ == "RefreshTokenStore"
+    assert RedisRefreshTokenStore.__name__ == "RedisRefreshTokenStore"
 
 
 def test_include_plugin_works_with_calango():
