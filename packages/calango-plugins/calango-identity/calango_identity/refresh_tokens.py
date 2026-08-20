@@ -53,6 +53,9 @@ class _RefreshTokenRecord:
     status: TokenStatus
 
 
+_TOKEN_GENERATION_ATTEMPTS = 3
+
+
 class InMemoryRefreshTokenStore:
     """A deterministic refresh-token store suitable for development and tests."""
 
@@ -72,10 +75,9 @@ class InMemoryRefreshTokenStore:
     async def issue(self, user_id: UUID) -> RefreshTokenPair:
         family_id = uuid4()
         expires_at = self._now() + self._lifetime
-        token = self._token_factory()
-        digest = self._digest(token)
 
         async with self._lock:
+            token, digest = self._new_unique_token()
             self.records[digest] = _RefreshTokenRecord(
                 user_id=user_id,
                 family_id=family_id,
@@ -103,8 +105,7 @@ class InMemoryRefreshTokenStore:
             if record.status is TokenStatus.REVOKED:
                 raise InvalidRefreshToken
 
-            replacement = self._token_factory()
-            replacement_digest = self._digest(replacement)
+            replacement, replacement_digest = self._new_unique_token()
             record.status = TokenStatus.USED
             self.records[replacement_digest] = _RefreshTokenRecord(
                 user_id=record.user_id,
@@ -134,6 +135,14 @@ class InMemoryRefreshTokenStore:
         if len(token) < 43:
             raise InvalidRefreshToken
         return sha256(token.encode()).hexdigest()
+
+    def _new_unique_token(self) -> tuple[str, str]:
+        for _ in range(_TOKEN_GENERATION_ATTEMPTS):
+            token = self._token_factory()
+            digest = self._digest(token)
+            if digest not in self.records:
+                return token, digest
+        raise RefreshTokenStorageError("could not generate a unique refresh token")
 
     def _revoke_family(self, family_id: UUID) -> None:
         for record in self.records.values():

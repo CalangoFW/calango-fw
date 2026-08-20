@@ -9,6 +9,7 @@ from calango_identity.refresh_tokens import (
     InMemoryRefreshTokenStore,
     InvalidRefreshToken,
     RefreshTokenReuse,
+    RefreshTokenStorageError,
 )
 
 NOW = datetime(2026, 8, 20, tzinfo=UTC)
@@ -63,3 +64,48 @@ async def test_revoke_family_is_idempotent(store):
     issued = await store.issue(USER_ID)
     await store.revoke(issued.token)
     await store.revoke(issued.token)
+
+
+async def test_rotate_retries_a_colliding_replacement_without_overwriting_original():
+    secrets = iter(("a" * 64, "a" * 64, "b" * 64))
+    store = InMemoryRefreshTokenStore(
+        lifetime=timedelta(days=7),
+        now=lambda: NOW,
+        token_factory=lambda: next(secrets),
+    )
+    issued = await store.issue(USER_ID)
+
+    rotated = await store.rotate(issued.token)
+
+    assert rotated.token == "b" * 64
+    with pytest.raises(RefreshTokenReuse):
+        await store.rotate(issued.token)
+
+
+async def test_issue_raises_storage_error_when_factory_cannot_produce_unique_token():
+    store = InMemoryRefreshTokenStore(
+        lifetime=timedelta(days=7),
+        now=lambda: NOW,
+        token_factory=lambda: "a" * 64,
+    )
+    await store.issue(USER_ID)
+
+    with pytest.raises(RefreshTokenStorageError, match="unique"):
+        await store.issue(USER_ID)
+
+
+async def test_rotate_leaves_token_active_when_factory_cannot_produce_unique_token():
+    token = ["a" * 64]
+    store = InMemoryRefreshTokenStore(
+        lifetime=timedelta(days=7),
+        now=lambda: NOW,
+        token_factory=lambda: token[0],
+    )
+    issued = await store.issue(USER_ID)
+
+    with pytest.raises(RefreshTokenStorageError, match="unique"):
+        await store.rotate(issued.token)
+
+    token[0] = "b" * 64
+    rotated = await store.rotate(issued.token)
+    assert rotated.token == "b" * 64
