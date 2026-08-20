@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
+from json import JSONDecodeError
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi_users import FastAPIUsers, exceptions
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from calango.exceptions import AuthenticationError, ServiceUnavailableError
@@ -26,6 +28,17 @@ from calango_identity.schemas import (
 from calango_identity.security import create_access_token, make_auth_backend
 from calango_identity.settings import IdentitySettings
 
+_REFRESH_TOKEN_OPENAPI_BODY = {
+    "requestBody": {
+        "required": True,
+        "content": {
+            "application/json": {
+                "schema": RefreshTokenInput.model_json_schema(),
+            }
+        },
+    }
+}
+
 
 def _translate_refresh_error(
     exc: Exception,
@@ -33,6 +46,14 @@ def _translate_refresh_error(
     if isinstance(exc, RefreshTokenStorageError):
         return ServiceUnavailableError("Authentication service unavailable")
     return AuthenticationError("Invalid refresh token")
+
+
+async def _parse_refresh_token(request: Request) -> str:
+    try:
+        payload = await request.json()
+        return RefreshTokenInput.model_validate(payload).refresh_token
+    except (JSONDecodeError, UnicodeDecodeError, ValidationError) as exc:
+        raise AuthenticationError("Invalid refresh token") from exc
 
 
 def make_auth_router(
@@ -81,13 +102,19 @@ def make_auth_router(
             expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         )
 
-    @router.post("/auth/refresh", response_model=TokenResponse, tags=["auth"])
+    @router.post(
+        "/auth/refresh",
+        response_model=TokenResponse,
+        tags=["auth"],
+        openapi_extra=_REFRESH_TOKEN_OPENAPI_BODY,
+    )
     async def refresh(
-        body: RefreshTokenInput,
+        request: Request,
         user_manager: UserManager = Depends(_get_user_manager),  # noqa: B008
     ) -> TokenResponse:
+        token = await _parse_refresh_token(request)
         try:
-            refresh_token = await refresh_store.rotate(body.refresh_token)
+            refresh_token = await refresh_store.rotate(token)
         except (InvalidRefreshToken, RefreshTokenStorageError) as exc:
             raise _translate_refresh_error(exc) from exc
 
@@ -104,13 +131,17 @@ def make_auth_router(
             expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         )
 
-    @router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT, tags=["auth"])
-    async def logout(body: RefreshTokenInput) -> None:
+    @router.post(
+        "/auth/logout",
+        status_code=status.HTTP_204_NO_CONTENT,
+        tags=["auth"],
+        openapi_extra=_REFRESH_TOKEN_OPENAPI_BODY,
+    )
+    async def logout(request: Request) -> None:
+        token = await _parse_refresh_token(request)
         try:
-            await refresh_store.revoke(body.refresh_token)
-        except InvalidRefreshToken:
-            return
-        except RefreshTokenStorageError as exc:
+            await refresh_store.revoke(token)
+        except (InvalidRefreshToken, RefreshTokenStorageError) as exc:
             raise _translate_refresh_error(exc) from exc
 
     router.include_router(

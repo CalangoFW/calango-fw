@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
@@ -11,7 +12,7 @@ from calango_identity.refresh_tokens import (
 )
 from calango_identity.router import make_auth_router
 from calango_identity.settings import IdentitySettings
-from httpx import ASGITransport, AsyncClient
+from httpx import ASGITransport, AsyncClient, Response
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from calango import Calango
@@ -35,8 +36,13 @@ def settings():
 
 
 @pytest.fixture
-def refresh_store():
-    return InMemoryRefreshTokenStore()
+def clock():
+    return [datetime(2026, 8, 20, tzinfo=UTC)]
+
+
+@pytest.fixture
+def refresh_store(clock: list[datetime]):
+    return InMemoryRefreshTokenStore(now=lambda: clock[0])
 
 
 @pytest.fixture
@@ -103,6 +109,24 @@ async def login_user(client: AsyncClient, email: str) -> dict:
     return response.json()
 
 
+def assert_invalid_refresh_response(response: Response) -> None:
+    assert response.status_code == 401, response.text
+    assert response.json()["error"] == "authentication_error"
+    assert response.json()["message"] == "Invalid refresh token"
+
+
+INVALID_REFRESH_REQUESTS = [
+    pytest.param({"json": {}}, id="absent"),
+    pytest.param(
+        {"content": b"{", "headers": {"content-type": "application/json"}},
+        id="malformed-json",
+    ),
+    pytest.param({"json": {"refresh_token": "short"}}, id="short"),
+    pytest.param({"json": {"refresh_token": "x" * 513}}, id="oversized"),
+    pytest.param({"json": {"refresh_token": ["not", "a", "string"]}}, id="incompatible"),
+]
+
+
 async def test_register_returns_201(client):
     """POST /auth/register with valid data returns 201."""
     response = await client.post(
@@ -156,6 +180,29 @@ async def test_generated_jwt_login_is_not_registered(client):
     assert response.status_code == 404
 
 
+async def test_refresh_endpoints_document_refresh_token_schema(
+    session: AsyncSession,
+    settings: IdentitySettings,
+    refresh_store: InMemoryRefreshTokenStore,
+):
+    app = Calango()
+
+    async def get_db():
+        yield session
+
+    app.include_router(
+        make_auth_router(settings=settings, get_db=get_db, refresh_store=refresh_store)
+    )
+    schema = app.openapi()
+
+    for path in ("/auth/refresh", "/auth/logout"):
+        request_body = schema["paths"][path]["post"]["requestBody"]
+        token_schema = request_body["content"]["application/json"]["schema"]
+        assert request_body["required"] is True
+        assert token_schema["properties"]["refresh_token"]["minLength"] == 43
+        assert token_schema["properties"]["refresh_token"]["maxLength"] == 512
+
+
 async def test_refresh_rotates_both_tokens(client):
     login = await login_user(client, "refresh@example.com")
     response = await client.post(
@@ -179,11 +226,53 @@ async def test_refresh_reuse_returns_uniform_401_and_revokes_family(client):
     assert reused.json()["message"] == family.json()["message"] == "Invalid refresh token"
 
 
+@pytest.mark.parametrize("request_kwargs", INVALID_REFRESH_REQUESTS)
+async def test_refresh_malformed_tokens_return_uniform_401(client, request_kwargs):
+    response = await client.post("/auth/refresh", **request_kwargs)
+    assert_invalid_refresh_response(response)
+
+
+async def test_refresh_unknown_token_returns_uniform_401(client):
+    response = await client.post("/auth/refresh", json={"refresh_token": "x" * 43})
+    assert_invalid_refresh_response(response)
+
+
+async def test_refresh_expired_token_returns_uniform_401(client, clock: list[datetime]):
+    login = await login_user(client, "expired@example.com")
+    clock[0] += timedelta(days=8)
+
+    response = await client.post(
+        "/auth/refresh",
+        json={"refresh_token": login["refresh_token"]},
+    )
+
+    assert_invalid_refresh_response(response)
+
+
+async def test_refresh_revoked_token_returns_uniform_401(client):
+    login = await login_user(client, "revoked@example.com")
+    body = {"refresh_token": login["refresh_token"]}
+    assert (await client.post("/auth/logout", json=body)).status_code == 204
+
+    response = await client.post("/auth/refresh", json=body)
+
+    assert_invalid_refresh_response(response)
+
+
 async def test_logout_is_idempotent(client):
     login = await login_user(client, "logout@example.com")
     body = {"refresh_token": login["refresh_token"]}
     assert (await client.post("/auth/logout", json=body)).status_code == 204
     assert (await client.post("/auth/logout", json=body)).status_code == 204
+
+
+@pytest.mark.parametrize(
+    "request_kwargs",
+    [*INVALID_REFRESH_REQUESTS, pytest.param({"json": {"refresh_token": "x" * 43}}, id="unknown")],
+)
+async def test_logout_invalid_tokens_return_uniform_401(client, request_kwargs):
+    response = await client.post("/auth/logout", **request_kwargs)
+    assert_invalid_refresh_response(response)
 
 
 async def test_login_returns_uniform_503_when_refresh_store_is_unavailable(unavailable_client):
