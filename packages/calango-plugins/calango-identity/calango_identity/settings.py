@@ -18,6 +18,7 @@ class IdentitySettings(BaseSettings):
     PUBLIC_KEY: str
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    REFRESH_TOKEN_KEY_PREFIX: str = "calango:identity:refresh"  # noqa: S105 - Redis namespace
     RATE_LIMIT_LOGIN_PER_MINUTE: int = 5
     RATE_LIMIT_LOGIN_PER_HOUR_PER_EMAIL: int = 10
     REDIS_URL: str = "redis://localhost:6379/0"
