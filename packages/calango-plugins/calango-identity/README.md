@@ -32,6 +32,11 @@ app = Calango()
 app.include_plugin(IdentityPlugin())
 ```
 
+Once registered, the plugin requires a valid bearer access token on application
+routes already attached to the app and on routes added afterward. The plugin's
+login, registration, refresh, logout, and password-reset routes remain available
+without an access token because they provide their own authentication boundary.
+
 For tests or a custom persistence implementation, inject a value satisfying the
 `RefreshTokenStore` protocol:
 
@@ -111,6 +116,18 @@ than issuing or accepting a token without persistence.
 > store and send them only to the refresh or logout endpoint.
 
 ## Public routes and permissions
+
+Inject the authenticated user when a handler needs it:
+
+```python
+from fastapi import Depends
+from calango_identity import User, get_current_user
+
+
+@router.get("/account")
+async def account(user: User = Depends(get_current_user)) -> dict[str, str]:
+    return {"user_id": str(user.id)}
+```
 
 Use `@public` to mark an intentionally public FastAPI route:
 

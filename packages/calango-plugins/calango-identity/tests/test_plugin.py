@@ -53,8 +53,8 @@ def test_identity_plugin_register_adds_auth_routes(settings):
     plugin = IdentityPlugin(settings=settings)
     plugin.register(app)
 
-    routes = [getattr(r, "path", "") for r in app.routes]
-    assert any("/auth" in r for r in routes)
+    paths = app.openapi()["paths"]
+    assert any(path.startswith("/auth") for path in paths)
 
 
 def test_identity_plugin_uses_injected_refresh_store_for_session_routes(settings):
@@ -66,8 +66,8 @@ def test_identity_plugin_uses_injected_refresh_store_for_session_routes(settings
     plugin.register(app)
 
     assert plugin.refresh_store is refresh_store
-    routes = {getattr(route, "path", "") for route in app.routes}
-    assert {"/auth/login", "/auth/refresh", "/auth/logout"} <= routes
+    paths = app.openapi()["paths"]
+    assert {"/auth/login", "/auth/refresh", "/auth/logout"} <= paths.keys()
 
 
 def test_identity_plugin_builds_redis_store_from_settings(monkeypatch, settings):
@@ -81,12 +81,53 @@ def test_identity_plugin_builds_redis_store_from_settings(monkeypatch, settings)
     assert plugin.refresh_store.redis is sentinel
 
 
+class CloseTrackingRedis:
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+async def test_plugin_closes_plugin_owned_redis_client(monkeypatch, settings):
+    client = CloseTrackingRedis()
+    monkeypatch.setattr("calango_identity.plugin.redis.from_url", lambda *args, **kwargs: client)
+    app = FastAPI()
+    plugin = IdentityPlugin(settings=settings)
+    plugin.register(app)
+
+    async with app.router.lifespan_context(app):
+        pass
+
+    assert client.closed is True
+
+
+async def test_plugin_does_not_close_injected_redis_store_client(settings):
+    client = CloseTrackingRedis()
+    # This test double intentionally implements only the lifecycle method under test.
+    injected_store = RedisRefreshTokenStore(client)  # ty: ignore[invalid-argument-type]
+    app = FastAPI()
+    plugin = IdentityPlugin(settings=settings, refresh_store=injected_store)
+    plugin.register(app)
+
+    async with app.router.lifespan_context(app):
+        pass
+
+    assert client.closed is False
+
+
 def test_package_exports_redis_refresh_store_interfaces():
     """Applications can import the stable production refresh-store interfaces."""
     from calango_identity import RedisRefreshTokenStore, RefreshTokenStore
 
     assert RefreshTokenStore.__name__ == "RefreshTokenStore"
     assert RedisRefreshTokenStore.__name__ == "RedisRefreshTokenStore"
+
+
+def test_package_exports_current_user_dependency():
+    from calango_identity import get_current_user
+
+    assert callable(get_current_user)
 
 
 def test_include_plugin_works_with_calango():
@@ -104,5 +145,5 @@ def test_include_plugin_works_with_calango():
     plugin = IdentityPlugin(settings=identity_settings)
     app.include_plugin(plugin)
 
-    routes = [getattr(r, "path", "") for r in app.routes]
-    assert any("/auth" in r for r in routes)
+    paths = app.openapi()["paths"]
+    assert any(path.startswith("/auth") for path in paths)

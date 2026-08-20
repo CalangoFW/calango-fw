@@ -304,8 +304,8 @@ calango db suggest-indexes  # analyzes pg_stat_statements, suggests + generates 
 - Base: FastAPI-Users + JWT RS256 (asymmetric)
 - Endpoints: `POST /auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/register`, `/auth/forgot-password`, `/auth/reset-password`, and `/users`
 - `@public` decorator for public endpoints
-- `@require_permission("resource:action")` for RBAC
-- Rate limit on `/auth`: 5/min per IP, 10/hour per email
+- `require_permission("resource:action")` for RBAC
+- Rate limit on `/auth/login`: 5/min per IP, 10/hour per normalized email
 - JWT: access=15min, refresh=7-day absolute lifetime with atomic rotation and reuse-family revocation
 - Refresh tokens: opaque values stored only as SHA-256 digests; Redis failures fail closed
 - Argon2 for password hashing

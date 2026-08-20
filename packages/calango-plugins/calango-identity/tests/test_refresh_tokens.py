@@ -82,6 +82,20 @@ async def test_revoke_family_is_idempotent(store):
     await store.revoke(issued.token)
 
 
+async def test_in_memory_revoke_rejects_expired_token():
+    current_time = [NOW]
+    store = InMemoryRefreshTokenStore(
+        lifetime=timedelta(days=7),
+        now=lambda: current_time[0],
+        token_factory=lambda: "a" * 64,
+    )
+    issued = await store.issue(USER_ID)
+    current_time[0] = NOW + timedelta(days=8)
+
+    with pytest.raises(InvalidRefreshToken):
+        await store.revoke(issued.token)
+
+
 async def test_rotate_retries_a_colliding_replacement_without_overwriting_original():
     secrets = iter(("a" * 64, "a" * 64, "b" * 64))
     store = InMemoryRefreshTokenStore(

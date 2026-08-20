@@ -1,21 +1,27 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
+from calango_identity.manager import UserManager
 from calango_identity.models import Base
+from calango_identity.rate_limit import make_limiter
 from calango_identity.refresh_tokens import (
     InMemoryRefreshTokenStore,
     RefreshTokenPair,
     RefreshTokenStorageError,
 )
-from calango_identity.router import make_auth_router
+from calango_identity.router import _parse_refresh_token, make_auth_router
 from calango_identity.settings import IdentitySettings
 from httpx import ASGITransport, AsyncClient, Response
+from slowapi import Limiter
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from starlette.requests import Request as StarletteRequest
 
 from calango import Calango
+from calango.exceptions import AuthenticationError
 from tests.conftest import TEST_PRIVATE_KEY, TEST_PUBLIC_KEY
 
 
@@ -46,18 +52,30 @@ def refresh_store(clock: list[datetime]):
 
 
 @pytest.fixture
+def limiter() -> Limiter:
+    return make_limiter("memory://")
+
+
+@pytest.fixture
 async def client(
     session: AsyncSession,
     settings: IdentitySettings,
     refresh_store: InMemoryRefreshTokenStore,
+    limiter: Limiter,
 ):
     app = Calango()
+    app.state.limiter = limiter
 
     # Pass a dependency that yields the test session
     async def get_db():
         yield session
 
-    router = make_auth_router(settings=settings, get_db=get_db, refresh_store=refresh_store)
+    router = make_auth_router(
+        settings=settings,
+        get_db=get_db,
+        refresh_store=refresh_store,
+        limiter=limiter,
+    )
     app.include_router(router)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
@@ -75,8 +93,13 @@ class UnavailableRefreshTokenStore:
 
 
 @pytest.fixture
-async def unavailable_client(session: AsyncSession, settings: IdentitySettings):
+async def unavailable_client(
+    session: AsyncSession,
+    settings: IdentitySettings,
+    limiter: Limiter,
+):
     app = Calango()
+    app.state.limiter = limiter
 
     async def get_db():
         yield session
@@ -85,6 +108,7 @@ async def unavailable_client(session: AsyncSession, settings: IdentitySettings):
         settings=settings,
         get_db=get_db,
         refresh_store=UnavailableRefreshTokenStore(),
+        limiter=limiter,
     )
     app.include_router(router)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -172,6 +196,27 @@ async def test_login_wrong_password_returns_401(client):
     assert response.json()["error"] == "authentication_error"
 
 
+async def test_login_preserves_user_manager_after_login_hook(client, monkeypatch):
+    calls = []
+
+    async def on_after_login(self, user, request=None, response=None):
+        calls.append((user.email, request, response))
+
+    monkeypatch.setattr(UserManager, "on_after_login", on_after_login)
+    await register_user(client, "hook@example.com")
+
+    response = await client.post(
+        "/auth/login",
+        data={"username": "hook@example.com", "password": "SecurePassword123!"},
+    )
+
+    assert response.status_code == 200
+    assert len(calls) == 1
+    assert calls[0][0] == "hook@example.com"
+    assert calls[0][1] is not None
+    assert calls[0][2] is not None
+
+
 async def test_generated_jwt_login_is_not_registered(client):
     response = await client.post(
         "/auth/jwt/login",
@@ -184,14 +229,21 @@ async def test_refresh_endpoints_document_refresh_token_schema(
     session: AsyncSession,
     settings: IdentitySettings,
     refresh_store: InMemoryRefreshTokenStore,
+    limiter: Limiter,
 ):
     app = Calango()
+    app.state.limiter = limiter
 
     async def get_db():
         yield session
 
     app.include_router(
-        make_auth_router(settings=settings, get_db=get_db, refresh_store=refresh_store)
+        make_auth_router(
+            settings=settings,
+            get_db=get_db,
+            refresh_store=refresh_store,
+            limiter=limiter,
+        )
     )
     schema = app.openapi()
 
@@ -235,6 +287,44 @@ async def test_refresh_malformed_tokens_return_uniform_401(client, request_kwarg
 async def test_refresh_unknown_token_returns_uniform_401(client):
     response = await client.post("/auth/refresh", json={"refresh_token": "x" * 43})
     assert_invalid_refresh_response(response)
+
+
+async def test_refresh_validation_does_not_retain_submitted_token_in_exception_chain():
+    marker = "submitted-refresh-token-unique-marker"
+    body = json.dumps({"refresh_token": {"value": marker}}).encode()
+
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    request = StarletteRequest(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/auth/refresh",
+            "headers": [(b"content-type", b"application/json")],
+        },
+        receive,
+    )
+
+    with pytest.raises(AuthenticationError) as error:
+        await _parse_refresh_token(request)
+
+    assert marker not in str(error.value)
+    assert marker not in repr(error.value)
+    assert error.value.__cause__ is None
+    assert error.value.__context__ is None
+
+
+async def test_refresh_validation_does_not_return_submitted_token(client):
+    marker = "submitted-refresh-token-response-marker"
+
+    response = await client.post(
+        "/auth/refresh",
+        json={"refresh_token": {"value": marker}},
+    )
+
+    assert_invalid_refresh_response(response)
+    assert marker not in response.text
 
 
 async def test_refresh_expired_token_returns_uniform_401(client, clock: list[datetime]):

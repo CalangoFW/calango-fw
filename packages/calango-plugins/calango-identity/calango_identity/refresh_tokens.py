@@ -274,7 +274,7 @@ class InMemoryRefreshTokenStore:
 
         async with self._lock:
             record = self.records.get(digest)
-            if record is None:
+            if record is None or record.expires_at <= self._now():
                 raise InvalidRefreshToken
             self._revoke_family(record.family_id)
 
