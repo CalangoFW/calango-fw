@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+from uuid import UUID
+
 import pytest
 from calango_identity.models import Base
+from calango_identity.refresh_tokens import (
+    InMemoryRefreshTokenStore,
+    RefreshTokenPair,
+    RefreshTokenStorageError,
+)
 from calango_identity.router import make_auth_router
 from calango_identity.settings import IdentitySettings
-from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from calango import Calango
 from tests.conftest import TEST_PRIVATE_KEY, TEST_PUBLIC_KEY
 
 
@@ -28,17 +35,72 @@ def settings():
 
 
 @pytest.fixture
-async def client(session: AsyncSession, settings: IdentitySettings):
-    app = FastAPI()
+def refresh_store():
+    return InMemoryRefreshTokenStore()
+
+
+@pytest.fixture
+async def client(
+    session: AsyncSession,
+    settings: IdentitySettings,
+    refresh_store: InMemoryRefreshTokenStore,
+):
+    app = Calango()
 
     # Pass a dependency that yields the test session
     async def get_db():
         yield session
 
-    router = make_auth_router(settings=settings, get_db=get_db)
+    router = make_auth_router(settings=settings, get_db=get_db, refresh_store=refresh_store)
     app.include_router(router)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
+
+
+class UnavailableRefreshTokenStore:
+    async def issue(self, user_id: UUID) -> RefreshTokenPair:
+        raise RefreshTokenStorageError("sensitive storage diagnostics")
+
+    async def rotate(self, token: str) -> RefreshTokenPair:
+        raise RefreshTokenStorageError("sensitive storage diagnostics")
+
+    async def revoke(self, token: str) -> None:
+        raise RefreshTokenStorageError("sensitive storage diagnostics")
+
+
+@pytest.fixture
+async def unavailable_client(session: AsyncSession, settings: IdentitySettings):
+    app = Calango()
+
+    async def get_db():
+        yield session
+
+    router = make_auth_router(
+        settings=settings,
+        get_db=get_db,
+        refresh_store=UnavailableRefreshTokenStore(),
+    )
+    app.include_router(router)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac
+
+
+async def register_user(client: AsyncClient, email: str) -> None:
+    response = await client.post(
+        "/auth/register",
+        json={"email": email, "password": "SecurePassword123!"},
+    )
+    assert response.status_code == 201
+
+
+async def login_user(client: AsyncClient, email: str) -> dict:
+    await register_user(client, email)
+    response = await client.post(
+        "/auth/login",
+        data={"username": email, "password": "SecurePassword123!"},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
 
 
 async def test_register_returns_201(client):
@@ -62,43 +124,100 @@ async def test_register_duplicate_email_returns_400(client):
     assert response.status_code == 400
 
 
-async def test_login_returns_token(client):
-    """POST /auth/jwt/login with valid credentials returns access_token."""
-    await client.post(
-        "/auth/register",
-        json={
-            "email": "login@example.com",
-            "password": "SecurePassword123!",
-        },
+async def test_login_returns_access_and_refresh_tokens(client):
+    await register_user(client, "login@example.com")
+    response = await client.post(
+        "/auth/login",
+        data={"username": "login@example.com", "password": "SecurePassword123!"},
     )
+    assert response.status_code == 200, response.text
+    assert response.json()["token_type"] == "bearer"
+    assert response.json()["expires_in"] == 900
+    assert response.json()["access_token"]
+    assert response.json()["refresh_token"]
+
+
+async def test_login_wrong_password_returns_401(client):
+    """POST /auth/login with wrong password returns a uniform auth error."""
+    await register_user(client, "wrong@example.com")
+    response = await client.post(
+        "/auth/login",
+        data={"username": "wrong@example.com", "password": "WrongPassword!"},
+    )
+    assert response.status_code == 401
+    assert response.json()["error"] == "authentication_error"
+
+
+async def test_generated_jwt_login_is_not_registered(client):
     response = await client.post(
         "/auth/jwt/login",
-        data={
-            "username": "login@example.com",
-            "password": "SecurePassword123!",
-        },
+        data={"username": "user@example.com", "password": "SecurePassword123!"},
+    )
+    assert response.status_code == 404
+
+
+async def test_refresh_rotates_both_tokens(client):
+    login = await login_user(client, "refresh@example.com")
+    response = await client.post(
+        "/auth/refresh",
+        json={"refresh_token": login["refresh_token"]},
     )
     assert response.status_code == 200
-    assert "access_token" in response.json()
+    assert response.json()["refresh_token"] != login["refresh_token"]
+    assert response.json()["access_token"]
 
 
-async def test_login_wrong_password_returns_400(client):
-    """POST /auth/jwt/login with wrong password returns 400."""
-    await client.post(
-        "/auth/register",
-        json={
-            "email": "wrong@example.com",
+async def test_refresh_reuse_returns_uniform_401_and_revokes_family(client):
+    login = await login_user(client, "reuse@example.com")
+    rotated = await client.post("/auth/refresh", json={"refresh_token": login["refresh_token"]})
+    reused = await client.post("/auth/refresh", json={"refresh_token": login["refresh_token"]})
+    family = await client.post(
+        "/auth/refresh", json={"refresh_token": rotated.json()["refresh_token"]}
+    )
+    assert reused.status_code == family.status_code == 401
+    assert reused.json()["error"] == family.json()["error"] == "authentication_error"
+    assert reused.json()["message"] == family.json()["message"] == "Invalid refresh token"
+
+
+async def test_logout_is_idempotent(client):
+    login = await login_user(client, "logout@example.com")
+    body = {"refresh_token": login["refresh_token"]}
+    assert (await client.post("/auth/logout", json=body)).status_code == 204
+    assert (await client.post("/auth/logout", json=body)).status_code == 204
+
+
+async def test_login_returns_uniform_503_when_refresh_store_is_unavailable(unavailable_client):
+    await register_user(unavailable_client, "unavailable-login@example.com")
+    response = await unavailable_client.post(
+        "/auth/login",
+        data={
+            "username": "unavailable-login@example.com",
             "password": "SecurePassword123!",
         },
     )
-    response = await client.post(
-        "/auth/jwt/login",
-        data={
-            "username": "wrong@example.com",
-            "password": "WrongPassword!",
-        },
+    assert response.status_code == 503, response.text
+    assert response.json()["error"] == "service_unavailable"
+    assert response.json()["message"] == "Authentication service unavailable"
+
+
+async def test_refresh_returns_uniform_503_when_store_is_unavailable(unavailable_client):
+    response = await unavailable_client.post(
+        "/auth/refresh",
+        json={"refresh_token": "x" * 43},
     )
-    assert response.status_code == 400
+    assert response.status_code == 503
+    assert response.json()["error"] == "service_unavailable"
+    assert response.json()["message"] == "Authentication service unavailable"
+
+
+async def test_logout_returns_uniform_503_when_store_is_unavailable(unavailable_client):
+    response = await unavailable_client.post(
+        "/auth/logout",
+        json={"refresh_token": "x" * 43},
+    )
+    assert response.status_code == 503
+    assert response.json()["error"] == "service_unavailable"
+    assert response.json()["message"] == "Authentication service unavailable"
 
 
 async def test_forgot_password_returns_202(client):

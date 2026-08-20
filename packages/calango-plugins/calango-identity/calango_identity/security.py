@@ -6,6 +6,7 @@ from fastapi_users.authentication import (
     JWTStrategy,
 )
 
+from calango_identity.models import User
 from calango_identity.settings import IdentitySettings
 
 
@@ -18,8 +19,12 @@ def make_jwt_strategy(settings: IdentitySettings) -> JWTStrategy:
     )
 
 
+async def create_access_token(user: User, settings: IdentitySettings) -> str:
+    return await make_jwt_strategy(settings).write_token(user)
+
+
 def make_auth_backend(settings: IdentitySettings) -> AuthenticationBackend:
-    transport = BearerTransport(tokenUrl="/auth/jwt/login")
+    transport = BearerTransport(tokenUrl="/auth/login")
     return AuthenticationBackend(
         name="jwt",
         transport=transport,

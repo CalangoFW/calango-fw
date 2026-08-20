@@ -47,6 +47,13 @@ fwIDAQAB
 """
 
 
+@pytest.fixture(autouse=True)
+def isolate_calango_settings_from_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Host application settings must not leak into identity tests."""
+    for name in ("APP_NAME", "VERSION", "ENV", "DEBUG"):
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture
 def identity_settings() -> IdentitySettings:
     return IdentitySettings(

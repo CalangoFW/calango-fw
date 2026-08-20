@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import ClassVar
 
+import redis.asyncio as redis
 from fastapi import FastAPI, Request, Response
 from pydantic_settings import BaseSettings
 from slowapi.errors import RateLimitExceeded
 
 from calango_identity.rate_limit import make_limiter
+from calango_identity.refresh_tokens import RedisRefreshTokenStore
 from calango_identity.router import make_auth_router
 from calango_identity.settings import IdentitySettings
 
@@ -35,6 +38,12 @@ class IdentityPlugin:
         # ty has no pydantic plugin so it sees them as missing required args.
         self._settings = settings or IdentitySettings()  # ty: ignore[missing-argument]
         self._limiter = make_limiter(self._settings.REDIS_URL)
+        client = redis.from_url(self._settings.REDIS_URL, decode_responses=True)
+        self.refresh_store = RedisRefreshTokenStore(
+            client,
+            lifetime=timedelta(days=self._settings.REFRESH_TOKEN_EXPIRE_DAYS),
+            key_prefix=self._settings.REFRESH_TOKEN_KEY_PREFIX,
+        )
 
     def register(self, app: FastAPI) -> None:
         """Register auth routers, rate limiter, and exception handler."""
@@ -52,7 +61,11 @@ class IdentityPlugin:
             async def get_db():  # type: ignore[misc]  # pragma: no cover
                 yield None
 
-        auth_router = make_auth_router(settings=self._settings, get_db=get_db)
+        auth_router = make_auth_router(
+            settings=self._settings,
+            get_db=get_db,
+            refresh_store=self.refresh_store,
+        )
         app.include_router(auth_router)
 
     def migrations(self) -> list[str]:
