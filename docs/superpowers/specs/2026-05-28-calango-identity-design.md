@@ -295,6 +295,76 @@ POST   /auth/reset-password    # apply reset token
 GET    /auth/me                # current user info
 ```
 
+### Refresh-token rotation
+
+Access tokens remain stateless JWTs signed with RS256. Refresh tokens are opaque,
+high-entropy secrets whose plaintext value is returned to the client only once.
+The server stores only a SHA-256 digest in Redis; refresh tokens are never written
+to SQL, logs, or telemetry.
+
+Each stored token record contains:
+
+- `user_id` — owner of the session
+- `family_id` — stable identifier shared by every rotation in one session
+- `expires_at` — absolute session expiration
+- `status` — active, used, or revoked
+
+Redis keys use a TTL derived from `REFRESH_TOKEN_EXPIRE_DAYS`. Rotation does not
+extend the family's absolute expiration, preventing an indefinitely renewable
+session. Used-token records remain until that absolute expiration so reuse can be
+detected reliably; revoking a family makes every token in it unusable.
+
+`RefreshTokenStore` owns issuance, lookup, atomic rotation, and family revocation.
+The router depends on this interface instead of using Redis directly so the token
+lifecycle can be tested independently. The production implementation uses Redis;
+tests use an in-memory or fake-Redis implementation with the same semantics.
+
+#### Login
+
+`POST /auth/login` accepts the OAuth2 password form. After FastAPI-Users validates
+the credentials, login creates an access JWT and a new refresh-token family. The
+response contains:
+
+```json
+{
+  "access_token": "<jwt>",
+  "token_type": "bearer",
+  "refresh_token": "<opaque-secret>",
+  "expires_in": 900
+}
+```
+
+If Redis is unavailable, login returns `503 Service Unavailable`; it must not issue
+a refresh token that the server cannot subsequently revoke.
+
+#### Refresh
+
+`POST /auth/refresh` accepts `{"refresh_token": "<opaque-secret>"}` as JSON. The
+store consumes the current token and creates its replacement in one atomic Redis
+operation, implemented with a Redis transaction or Lua script. A successful
+request returns a new access JWT and a new refresh token in the same response shape
+as login. Two concurrent requests with the same token cannot both succeed.
+
+An absent, malformed, expired, revoked, or unknown token returns the same `401`
+response so callers cannot use error details as an oracle. If a token marked as
+used is presented again, the store treats that as reuse, revokes the entire family,
+and returns `401`. Security logs may contain non-sensitive identifiers such as the
+family ID, but never a raw token or token digest.
+
+#### Logout
+
+`POST /auth/logout` accepts the same JSON body and revokes the refresh token's
+family. Logout is idempotent for a validly formed token that is already revoked and
+returns `204 No Content`. A malformed token returns `401`. If Redis is unavailable,
+refresh and logout fail closed with `503 Service Unavailable`.
+
+#### Error contract
+
+Token validation failures use a single `401` error code and message. Storage
+failures use `503` and do not expose Redis details. The implementation must preserve
+the framework's normal error envelope and must not leak token material in exception
+messages.
+
 ### `IdentityPlugin`
 
 ```python
@@ -392,6 +462,15 @@ dependencies = [
   - RBAC tests: create user with roles, assert 403 vs 200
   - `@public` tests: verify unauthenticated access allowed
   - Integration: pytest-asyncio + ASGI test client (httpx)
+  - Refresh-token store tests: hashing, TTL, expiration, rotation, family revocation,
+    reuse detection, and Redis failure
+  - Refresh endpoint tests: successful rotation, uniform `401` failures, idempotent
+    logout, and `503` fail-closed behavior
+  - Concurrency test: exactly one of two simultaneous rotations can succeed
+
+Tests must isolate settings from unrelated process environment variables. In
+particular, a host-level value such as `DEBUG=release` must not affect tests that
+construct `CalangoSettings` explicitly.
 
 Target: ≥30 new tests across the 3 packages.
 
@@ -408,6 +487,12 @@ Target: ≥30 new tests across the 3 packages.
 | 5 | `calango-identity`: `@public` + `require_permission` + RBAC | 8 |
 | 6 | `calango-identity`: rate limiting (slowapi + Redis/fakeredis) | 6 |
 | 7 | `IdentityPlugin.register()` + integration wiring | 5 |
+| 8 | Refresh-token store + login/refresh/logout rotation flow | 10+ |
+
+Phase 6 is complete only when package READMEs document the public API, the roadmap
+no longer lists refresh rotation as pending, and Ruff, formatting, Ty, and the full
+Pytest suite pass. The security check is also run when its local executables are
+available. Phase 7 work is explicitly out of scope.
 
 ---
 
