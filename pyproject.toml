@@ -16,7 +16,7 @@ dev = [
     "ty>=0.0.1a1",
     "pytest-cov>=7.1.0",
     "aiosqlite>=0.22.1",
-    "fakeredis>=2.26",
+    "fakeredis[lua]>=2.26",
     "pip-audit>=2.7",
 ]
 
