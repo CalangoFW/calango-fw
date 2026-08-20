@@ -59,6 +59,7 @@ class _RefreshTokenRecord:
 _TOKEN_GENERATION_ATTEMPTS = 3
 
 
+# Returns "reserved" for a new key and "collision" for an existing key.
 _RESERVE_TOKEN_SCRIPT = """
 if redis.call('EXISTS', KEYS[1]) ~= 0 then
     return 'collision'
@@ -69,6 +70,7 @@ return 'reserved'
 """  # noqa: S105 - Lua source, not a credential
 
 
+# Returns "stored" after linking the reserved token key to its family.
 _ADD_TO_FAMILY_SCRIPT = """
 redis.call('HDEL', KEYS[2], 'reservation')
 redis.call('SADD', KEYS[1], ARGV[1])
