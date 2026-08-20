@@ -21,7 +21,7 @@
 
 ---
 
-> **Early development.** The core package is functional. The CLI and plugins are planned — see [Roadmap](#roadmap).
+> **Early development.** The core package, CLI, and Identity plugin are functional. More plugins are planned — see [Roadmap](#roadmap).
 
 ---
 
@@ -32,7 +32,7 @@ Calango is an **API-first** Python meta-framework for web development inspired b
 The premise: you shouldn't spend energy deciding where to put each file, how to configure CI, or how to structure your tests. Calango decides that for you — and when you need to deviate from the convention, the exit is explicit and documented.
 
 ```bash
-# Coming soon (CLI in development):
+# Create a project:
 pip install calango
 calango new my-project
 cd my-project && docker compose up
@@ -307,7 +307,7 @@ calango db suggest-indexes
 ### Core SaaS
 | Plugin | What it does |
 |---|---|
-| `calango-identity` | JWT RS256, refresh rotation, OAuth2, RBAC, Teams, invites |
+| `calango-identity` | JWT RS256, RBAC, rate-limited login, and rotating refresh tokens |
 | `calango-multitenancy` | Row-level (Postgres RLS default), schema-level, db-level |
 | `calango-payments` | Stripe + MercadoPago/Pix, webhooks with signature verification |
 | `calango-plans` | `@plan_limit` decorator, per-plan feature gates |
@@ -399,7 +399,7 @@ my-project/
 |---|---|---|
 | **M1** "calango new works" | Core + CLI scaffold | 🟢 Done |
 | **M2** "generate resource" | Full CRUD scaffold with real database | 🟢 Done |
-| **M3** "minimal SaaS" | JWT auth + RBAC + protected endpoints | 🟡 In progress |
+| **M3** "minimal SaaS" | JWT auth + RBAC + protected endpoints | 🟢 Done |
 | **M4** "SaaS core" | Multi-tenancy (RLS) + payments (Stripe + Pix) | 🔴 Planned |
 | **M5** "AI layer" | `calango generate agent` → running agent with MCP | 🔴 Planned |
 | **M6** "Ecosystem" | All plugins + published MkDocs docs | 🔴 Planned |
@@ -417,7 +417,7 @@ See [ROADMAP.md](ROADMAP.md) for the full breakdown.
 | `calango-cli` — `calango check:security` (SAST + SCA) | ✅ Done |
 | `calango-core` — `BaseRepository` + `BaseService` | ✅ Done |
 | `calango-cli` — `calango db` (revision/migrate/rollback/seed) | ✅ Done |
-| `calango-identity` — JWT RS256, RBAC, rate limit | 🟡 Mostly done (refresh rotation pending) |
+| `calango-identity` — JWT RS256, RBAC, rate limit, refresh-token rotation | ✅ Done |
 | `calango-agents` | 🔴 Planned |
 | `calango-payments` | 🔴 Planned |
 | Documentation | 🔴 Planned |

@@ -297,16 +297,17 @@ calango db suggest-indexes  # analyzes pg_stat_statements, suggests + generates 
 
 ## M3 — "minimal SaaS"
 
-### Phase 6: calango-identity 🟡 Mostly done — refresh-token rotation pending
+### Phase 6: calango-identity ✅ Done
 
 `packages/calango-plugins/calango-identity/`
 
 - Base: FastAPI-Users + JWT RS256 (asymmetric)
-- Endpoints: `POST /auth/login`, `/auth/register`, `/auth/refresh`, `/auth/forgot-password`
+- Endpoints: `POST /auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/register`, `/auth/forgot-password`, `/auth/reset-password`, and `/users`
 - `@public` decorator for public endpoints
 - `@require_permission("resource:action")` for RBAC
 - Rate limit on `/auth`: 5/min per IP, 10/hour per email
-- JWT: access=15min, refresh=7 days with rotation
+- JWT: access=15min, refresh=7-day absolute lifetime with atomic rotation and reuse-family revocation
+- Refresh tokens: opaque values stored only as SHA-256 digests; Redis failures fail closed
 - Argon2 for password hashing
 
 ---
