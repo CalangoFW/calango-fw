@@ -320,6 +320,7 @@ source = { editable = "packages/calango-plugins/calango-identity" }
 dependencies = [
     { name = "argon2-cffi" },
     { name = "asyncpg" },
+    { name = "calango-core" },
     { name = "calango-plugin-base" },
     { name = "cryptography" },
     { name = "fastapi" },
@@ -336,6 +337,7 @@ dependencies = [
 requires-dist = [
     { name = "argon2-cffi", specifier = ">=23" },
     { name = "asyncpg", specifier = ">=0.30" },
+    { name = "calango-core", editable = "packages/calango-core" },
     { name = "calango-plugin-base", editable = "packages/calango-plugin-base" },
     { name = "cryptography", specifier = ">=50.0.0" },
     { name = "fastapi", specifier = ">=0.141.1" },

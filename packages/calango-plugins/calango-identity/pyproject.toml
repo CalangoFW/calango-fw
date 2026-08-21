@@ -5,6 +5,7 @@ description = "Calango Framework — Identity plugin (JWT RS256 + RBAC)"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "calango-core",
     "calango-plugin-base",
     "cryptography>=50.0.0",
     "fastapi>=0.141.1",
@@ -20,6 +21,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
+calango-core = { workspace = true }
 calango-plugin-base = { workspace = true }
 
 [build-system]

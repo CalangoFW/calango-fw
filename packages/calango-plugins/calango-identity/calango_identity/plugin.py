@@ -98,8 +98,8 @@ class IdentityPlugin:
             await self._owned_redis_client.aclose()
 
     def migrations(self) -> tuple[PluginMigration, ...]:
-        """Return the wheel-safe location for future identity revisions."""
-        versions = files("calango_identity").joinpath("migrations", "versions")
+        """Return the wheel-safe location for identity revisions."""
+        versions = files("calango_identity.migrations.versions")
         return (PluginMigration("identity", versions, ()),)
 
     def settings(self) -> type[BaseSettings]:
