@@ -1,13 +1,16 @@
 import os
+import subprocess
+import sys
+from importlib.resources.abc import Traversable
 from pathlib import Path
 from types import ModuleType
-from typing import ClassVar
+from typing import ClassVar, cast
 from unittest.mock import MagicMock, patch
 from zipfile import Path as ZipPath
 from zipfile import ZipFile
 
 import pytest
-from alembic.config import Config
+from alembic.config import CommandLine, Config
 from alembic.script import ScriptDirectory
 from calango_plugin_base import PluginMigration
 from typer.testing import CliRunner
@@ -15,6 +18,7 @@ from typer.testing import CliRunner
 from calango_cli.main import app
 from calango_cli.migrations import (
     MigrationConfigurationError,
+    MigrationResources,
     order_migrations,
     version_locations,
 )
@@ -22,10 +26,113 @@ from calango_cli.migrations import (
 runner = CliRunner()
 
 
+class _UnreadableVersions(Traversable):
+    @property
+    def name(self) -> str:
+        return "versions"
+
+    def iterdir(self):
+        raise OSError("private resource path")
+
+    def is_dir(self) -> bool:
+        return True
+
+    def is_file(self) -> bool:
+        return False
+
+    def open(self, mode="r", *args, **kwargs):
+        raise OSError("private resource path")
+
+
 def _project(tmp_path: Path) -> Path:
     (tmp_path / "alembic.ini").write_text("[alembic]\n")
     (tmp_path / "app").mkdir()
     return tmp_path
+
+
+def _configure_real_alembic_plugin(
+    project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    revisions: tuple[str, ...],
+) -> Path:
+    """Install a subprocess-visible fixture plugin without touching site-packages."""
+    versions = project / "fixture_plugin_versions"
+    versions.mkdir()
+    for index, revision_id in enumerate(revisions):
+        (versions / f"{index + 1:04d}_{revision_id}.py").write_text(
+            f"revision = {revision_id!r}\n"
+            "down_revision = None\n"
+            "branch_labels = None\n"
+            "depends_on = None\n"
+            "def upgrade():\n"
+            "    pass\n"
+            "def downgrade():\n"
+            "    pass\n"
+        )
+    (project / "fixture_plugin.py").write_text(
+        "from pathlib import Path\n"
+        "from pydantic_settings import BaseSettings\n"
+        "from calango_plugin_base import PluginMigration\n"
+        "class FixturePlugin:\n"
+        "    name = 'fixture_plugin'\n"
+        "    version = '1.0.0'\n"
+        "    requires = []\n"
+        "    def register(self, app):\n"
+        "        pass\n"
+        "    def import_models(self):\n"
+        "        pass\n"
+        "    def migrations(self):\n"
+        "        versions = Path(__file__).parent / 'fixture_plugin_versions'\n"
+        "        return (PluginMigration('fixture_plugin', versions, ()),)\n"
+        "    def settings(self):\n"
+        "        return BaseSettings\n"
+        "    def test_fixtures(self):\n"
+        "        return []\n"
+        "    def context_md(self):\n"
+        "        return ''\n"
+    )
+    (project / "sitecustomize.py").write_text(
+        "import importlib.metadata\n"
+        "class FixtureEntryPoint:\n"
+        "    name = 'fixture_plugin'\n"
+        "    def load(self):\n"
+        "        from fixture_plugin import FixturePlugin\n"
+        "        return FixturePlugin\n"
+        "def fixture_entry_points(**kwargs):\n"
+        "    if kwargs.get('group') == 'calango.plugins':\n"
+        "        return (FixtureEntryPoint(),)\n"
+        "    return ()\n"
+        "importlib.metadata.entry_points = fixture_entry_points\n"
+    )
+    monkeypatch.setenv("PYTHONPATH", str(project))
+    monkeypatch.setenv("SECURITY__SECRET_KEY", "test-only-secret")
+    monkeypatch.setenv("DATABASE__URL", "sqlite+aiosqlite:///calango-test.db")
+    return versions
+
+
+def _current_python_alembic_runner(real_run):
+    def run(argv, **kwargs):
+        assert argv[1:3] == ["run", "alembic"]
+        kwargs.pop("capture_output", None)
+        kwargs.pop("text", None)
+        completed = real_run(
+            [sys.executable, "-m", "alembic", *argv[3:]],
+            capture_output=True,
+            text=True,
+            **kwargs,
+        )
+        sys.stdout.write(completed.stdout)
+        sys.stderr.write(completed.stderr)
+        return completed
+
+    return run
+
+
+def _tree_snapshot(root: Path) -> dict[str, bytes | None]:
+    return {
+        str(path.relative_to(root)): path.read_bytes() if path.is_file() else None
+        for path in root.rglob("*")
+    }
 
 
 def test_db_help_exits_0():
@@ -164,6 +271,97 @@ def test_db_revision_passes_message(tmp_path):
     assert "--autogenerate" in argv and "add orders" in argv
 
 
+def test_db_revision_real_alembic_uses_generated_template_and_local_destination(
+    tmp_path,
+    monkeypatch,
+):
+    result = runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+    project = tmp_path / "my-api"
+    plugin_versions = _configure_real_alembic_plugin(project, monkeypatch, ("plugin_0001",))
+    plugin_before = _tree_snapshot(plugin_versions)
+    real_run = subprocess.run
+
+    with (
+        patch("calango_cli.commands.db.shutil.which", return_value="/fixture/uv"),
+        patch(
+            "calango_cli.commands.db.subprocess.run",
+            side_effect=_current_python_alembic_runner(real_run),
+        ),
+    ):
+        migrated = runner.invoke(app, ["db", "migrate", "--path", str(project)])
+        result = runner.invoke(
+            app,
+            ["db", "revision", "-m", "add orders", "--path", str(project)],
+        )
+
+    assert migrated.exit_code == 0, migrated.output
+    assert result.exit_code == 0, result.output
+    revisions = tuple((project / "alembic" / "versions").glob("*.py"))
+    assert len(revisions) == 1
+    content = revisions[0].read_text()
+    assert "add orders" in content
+    assert "plugin_0001" in content
+    assert "def upgrade() -> None:" in content
+    assert _tree_snapshot(plugin_versions) == plugin_before
+
+
+def test_db_revision_requires_head_for_multihead_and_writes_selected_head_locally(
+    tmp_path,
+    monkeypatch,
+):
+    result = runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+    project = tmp_path / "my-api"
+    plugin_versions = _configure_real_alembic_plugin(
+        project,
+        monkeypatch,
+        ("plugin_a_0001", "plugin_b_0001"),
+    )
+    plugin_before = _tree_snapshot(plugin_versions)
+    local_versions = project / "alembic" / "versions"
+    real_run = subprocess.run
+
+    with (
+        patch("calango_cli.commands.db.shutil.which", return_value="/fixture/uv"),
+        patch(
+            "calango_cli.commands.db.subprocess.run",
+            side_effect=_current_python_alembic_runner(real_run),
+        ),
+    ):
+        migrated = runner.invoke(app, ["db", "migrate", "--path", str(project)])
+        ambiguous = runner.invoke(
+            app,
+            ["db", "revision", "-m", "ambiguous", "--path", str(project)],
+        )
+        after_ambiguous = tuple(local_versions.glob("*.py"))
+        selected = runner.invoke(
+            app,
+            [
+                "db",
+                "revision",
+                "-m",
+                "selected",
+                "--head",
+                "plugin_a_0001",
+                "--path",
+                str(project),
+            ],
+        )
+
+    assert migrated.exit_code == 0, migrated.output
+    assert ambiguous.exit_code != 0
+    assert "Multiple heads" in ambiguous.output
+    assert "--head" in ambiguous.output
+    assert "Traceback" not in ambiguous.output
+    assert after_ambiguous == ()
+    assert selected.exit_code == 0, selected.output
+    revisions = tuple(local_versions.glob("*.py"))
+    assert len(revisions) == 1
+    assert "plugin_a_0001" in revisions[0].read_text()
+    assert _tree_snapshot(plugin_versions) == plugin_before
+
+
 def test_db_migrate_not_a_project_exits_1(tmp_path):
     result = runner.invoke(app, ["db", "migrate", "--path", str(tmp_path)])
     assert result.exit_code == 1
@@ -241,6 +439,71 @@ def test_order_migrations_rejects_cycle(tmp_path):
         order_migrations(items)
 
 
+@pytest.mark.parametrize(
+    "name", ["", ".", "..", "../identity", "identity/plugin", "identity plugin"]
+)
+def test_order_migrations_rejects_unsafe_plugin_name_without_echoing_it(tmp_path, name):
+    descriptor = PluginMigration(name, tmp_path, ())
+
+    with pytest.raises(MigrationConfigurationError, match="invalid plugin migration name") as error:
+        order_migrations((descriptor,))
+
+    if "/" in name:
+        assert name not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("depends_on", "expected"),
+    [
+        (cast(tuple[str, ...], ["base"]), "must be a tuple"),
+        (("",), "invalid dependency"),
+        (("../base",), "invalid dependency"),
+        (("base", "base"), "duplicate dependency"),
+        (("identity",), "cannot depend on itself"),
+    ],
+)
+def test_order_migrations_rejects_invalid_dependency_contract(
+    tmp_path,
+    depends_on,
+    expected,
+):
+    descriptor = PluginMigration("identity", tmp_path, depends_on)
+
+    with pytest.raises(MigrationConfigurationError, match=expected) as error:
+        order_migrations((PluginMigration("base", tmp_path, ()), descriptor))
+
+    assert "identity" in str(error.value)
+    assert "Update or reinstall" in str(error.value)
+
+
+@pytest.mark.parametrize(
+    "versions",
+    [
+        cast(Traversable, object()),
+        _UnreadableVersions(),
+    ],
+)
+def test_order_migrations_rejects_non_traversable_or_unreadable_versions(tmp_path, versions):
+    descriptor = PluginMigration("identity", versions, ())
+
+    with pytest.raises(MigrationConfigurationError, match=r"identity.*versions") as error:
+        order_migrations((descriptor,))
+
+    assert "private resource path" not in str(error.value)
+    assert str(tmp_path) not in str(error.value)
+    assert "Update or reinstall" in str(error.value)
+
+
+def test_order_migrations_rejects_file_versions_without_disclosing_path(tmp_path):
+    private_file = tmp_path / "customer-private-migrations.py"
+    private_file.write_text("revision = 'private'\n")
+
+    with pytest.raises(MigrationConfigurationError, match=r"identity.*versions") as error:
+        order_migrations((PluginMigration("identity", private_file, ()),))
+
+    assert str(private_file) not in str(error.value)
+
+
 def test_version_locations_preserves_topological_order(tmp_path):
     accounts = tmp_path / "accounts"
     orders = tmp_path / "orders"
@@ -253,18 +516,26 @@ def test_version_locations_preserves_topological_order(tmp_path):
         PluginMigration("accounts", accounts, ()),
     )
 
-    locations = version_locations(items)
+    with MigrationResources() as resources:
+        locations = version_locations(items, resources=resources)
 
-    assert locations[0] == accounts
-    assert locations[1].name == orders.name
-    assert locations[1] != orders
+        assert locations[0] != accounts
+        assert locations[0].joinpath("0001_accounts.py").is_file()
+        assert locations[1].name == "versions"
+        assert locations[1] != orders
 
 
 def test_version_locations_rejects_missing_plugin_directory(tmp_path):
     missing = tmp_path / "missing"
 
-    with pytest.raises(MigrationConfigurationError, match=r"identity.*missing"):
-        version_locations((PluginMigration("identity", missing, ()),))
+    with (
+        MigrationResources() as resources,
+        pytest.raises(MigrationConfigurationError, match=r"identity.*versions"),
+    ):
+        version_locations(
+            (PluginMigration("identity", missing, ()),),
+            resources=resources,
+        )
 
 
 def test_version_locations_materializes_non_filesystem_traversable(tmp_path):
@@ -272,12 +543,110 @@ def test_version_locations_materializes_non_filesystem_traversable(tmp_path):
     with ZipFile(archive_path, "w") as archive:
         archive.writestr("versions/0001_plugin.py", "revision = 'plugin_0001'\n")
 
+    with ZipFile(archive_path) as archive, MigrationResources() as resources:
+        resource = ZipPath(archive, at="versions/")
+        (location,) = version_locations(
+            (PluginMigration("plugin", resource, ()),),
+            resources=resources,
+        )
+
+        assert location.is_dir()
+        assert location.joinpath("0001_plugin.py").read_text() == "revision = 'plugin_0001'\n"
+    assert not location.exists()
+
+
+def test_migration_resources_cleanup_materialized_archives_and_dependency_overlays(tmp_path):
+    archive_path = tmp_path / "base-plugin.zip"
+    with ZipFile(archive_path, "w") as archive:
+        archive.writestr(
+            "versions/0001_base.py",
+            "revision = 'base_0001'\ndown_revision = None\n",
+        )
+    dependent = tmp_path / "dependent_versions"
+    dependent.mkdir()
+    (dependent / "0001_dependent.py").write_text(
+        "revision = 'dependent_0001'\ndown_revision = None\n"
+    )
+
+    with ZipFile(archive_path) as archive, MigrationResources() as resources:
+        base_resource = ZipPath(archive, at="versions/")
+        locations = version_locations(
+            (
+                PluginMigration("base", base_resource, ()),
+                PluginMigration("dependent", dependent, ("base",)),
+            ),
+            resources=resources,
+        )
+        materialized, overlay = locations
+        assert materialized.is_dir()
+        assert overlay.is_dir()
+        assert overlay != dependent
+
+    assert not materialized.exists()
+    assert not overlay.exists()
+    assert dependent.is_dir()
+
+
+def test_owned_version_locations_release_previous_context_on_repeated_use(tmp_path):
+    from calango_cli.migrations import (
+        own_version_locations,
+        release_version_locations,
+    )
+
+    archive_path = tmp_path / "plugin.zip"
+    with ZipFile(archive_path, "w") as archive:
+        archive.writestr(
+            "versions/0001_plugin.py",
+            "revision = 'plugin_0001'\ndown_revision = None\n",
+        )
+
+    config = Config()
     with ZipFile(archive_path) as archive:
         resource = ZipPath(archive, at="versions/")
-        (location,) = version_locations((PluginMigration("plugin", resource, ()),))
+        first = own_version_locations(
+            config,
+            (PluginMigration("plugin", resource, ()),),
+        )[0]
+        assert first.is_dir()
 
-    assert location.is_dir()
-    assert location.joinpath("0001_plugin.py").read_text() == "revision = 'plugin_0001'\n"
+        second = own_version_locations(
+            config,
+            (PluginMigration("plugin", resource, ()),),
+        )[0]
+        assert not first.exists()
+        assert second.is_dir()
+
+        release_version_locations(config)
+        assert not second.exists()
+
+
+def test_version_locations_wraps_temporary_directory_failure_without_path(
+    tmp_path,
+):
+    archive_path = tmp_path / "plugin.zip"
+    with ZipFile(archive_path, "w") as archive:
+        archive.writestr(
+            "versions/0001_plugin.py",
+            "revision = 'plugin_0001'\ndown_revision = None\n",
+        )
+
+    with (
+        ZipFile(archive_path) as archive,
+        MigrationResources() as resources,
+        patch(
+            "calango_cli.migrations.TemporaryDirectory",
+            side_effect=OSError("private /arbitrary/path"),
+        ),
+        pytest.raises(MigrationConfigurationError, match=r"plugin.*temporary") as error,
+    ):
+        resource = ZipPath(archive, at="versions/")
+        version_locations(
+            (PluginMigration("plugin", resource, ()),),
+            resources=resources,
+        )
+
+    assert "/arbitrary/path" not in str(error.value)
+    assert "Update or reinstall" in str(error.value)
 
 
 def test_version_locations_adds_effective_alembic_dependency_edges(tmp_path):
@@ -299,16 +668,17 @@ def test_version_locations_adds_effective_alembic_dependency_edges(tmp_path):
         PluginMigration("base", base_versions, ()),
     )
 
-    locations = tuple(reversed(version_locations(items)))
-    script_root = tmp_path / "alembic"
-    script_root.mkdir()
-    config = Config()
-    config.set_main_option("script_location", str(script_root))
-    config.set_main_option("version_locations", os.pathsep.join(map(str, locations)))
-    config.set_main_option("path_separator", "os")
-    scripts = ScriptDirectory.from_config(config)
+    with MigrationResources() as resources:
+        locations = tuple(reversed(version_locations(items, resources=resources)))
+        script_root = tmp_path / "alembic"
+        script_root.mkdir()
+        config = Config()
+        config.set_main_option("script_location", str(script_root))
+        config.set_main_option("version_locations", os.pathsep.join(map(str, locations)))
+        config.set_main_option("path_separator", "os")
+        scripts = ScriptDirectory.from_config(config)
 
-    assert scripts.get_revision("dependent_0001").down_revision == "base_0001"
+        assert scripts.get_revision("dependent_0001").down_revision == "base_0001"
 
 
 def test_version_locations_removes_transitively_redundant_parent(tmp_path):
@@ -327,17 +697,18 @@ def test_version_locations_removes_transitively_redundant_parent(tmp_path):
         PluginMigration("c", locations_by_name["c"], ("a", "b")),
     )
 
-    locations = version_locations(items)
-    script_root = tmp_path / "alembic"
-    script_root.mkdir()
-    config = Config()
-    config.set_main_option("script_location", str(script_root))
-    config.set_main_option("version_locations", os.pathsep.join(map(str, locations)))
-    config.set_main_option("path_separator", "os")
-    scripts = ScriptDirectory.from_config(config)
+    with MigrationResources() as resources:
+        locations = version_locations(items, resources=resources)
+        script_root = tmp_path / "alembic"
+        script_root.mkdir()
+        config = Config()
+        config.set_main_option("script_location", str(script_root))
+        config.set_main_option("version_locations", os.pathsep.join(map(str, locations)))
+        config.set_main_option("path_separator", "os")
+        scripts = ScriptDirectory.from_config(config)
 
-    assert scripts.get_revision("b_0001").down_revision == "a_0001"
-    assert scripts.get_revision("c_0001").down_revision == "b_0001"
+        assert scripts.get_revision("b_0001").down_revision == "a_0001"
+        assert scripts.get_revision("c_0001").down_revision == "b_0001"
 
 
 def test_generated_alembic_env_loads_plugins_before_metadata(monkeypatch, tmp_path):
@@ -389,9 +760,16 @@ def test_generated_alembic_env_loads_plugins_before_metadata(monkeypatch, tmp_pa
         lambda config, script: events.append("script-graph"),
     )
 
+    def own_locations(config, items):
+        events.append("migration-resources")
+        return tuple(item.versions for item in items)
+
+    monkeypatch.setattr(migrations_module, "own_version_locations", own_locations)
+
     class FakeConfig:
         config_file_name = None
         config_ini_section = "alembic"
+        attributes: ClassVar[dict[str, object]] = {}
 
         def set_main_option(self, name, value):
             events.append(f"config:{name}:{value}")
@@ -458,9 +836,70 @@ def test_generated_alembic_env_loads_plugins_before_metadata(monkeypatch, tmp_pa
         "entry-point",
         "plugin-models",
         "migrations",
+        "migration-resources",
         "config:version_locations:"
         + os.pathsep.join(("alembic/versions", str(tmp_path / "identity-versions"))),
         "script-graph",
         "models:app.contexts",
         "metadata",
     ]
+
+
+def test_generated_alembic_cli_translates_plugin_failure_without_traceback_or_cause(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    result = runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+    project = tmp_path / "my-api"
+    private_detail = f"plugin exploded at {tmp_path / 'private-plugin-resource'}"
+
+    class BrokenPlugin:
+        name = "broken_plugin"
+        version = "1.0.0"
+        requires: ClassVar[list[str]] = []
+
+        def register(self, app): ...
+
+        def import_models(self): ...
+
+        def migrations(self):
+            raise RuntimeError(private_detail)
+
+        def settings(self): ...
+
+        def test_fixtures(self):
+            return []
+
+        def context_md(self):
+            return ""
+
+    class BrokenEntryPoint:
+        name = "broken_plugin"
+
+        def load(self):
+            return BrokenPlugin
+
+    monkeypatch.setattr(
+        "importlib.metadata.entry_points",
+        lambda **kwargs: (BrokenEntryPoint(),),
+    )
+    monkeypatch.setenv("SECURITY__SECRET_KEY", "test-only-secret")
+    monkeypatch.setenv("DATABASE__URL", "sqlite+aiosqlite:///unused.db")
+    monkeypatch.chdir(project)
+
+    with pytest.raises(SystemExit) as exit_info:
+        CommandLine(prog="alembic").main(
+            ["-c", str(project / "alembic.ini"), "upgrade", "heads", "--sql"]
+        )
+
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    assert exit_info.value.code != 0
+    assert "broken_plugin" in output
+    assert "Update or reinstall" in output
+    assert "Traceback" not in output
+    assert "RuntimeError" not in output
+    assert private_detail not in output
+    assert str(tmp_path) not in output

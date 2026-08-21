@@ -63,14 +63,34 @@ def _current_revisions(project: Path) -> tuple[int, tuple[tuple[str, tuple[str, 
 @db_app.command("revision")
 def revision(
     message: str = typer.Option(..., "-m", "--message", help="Migration message"),
+    head: str | None = typer.Option(
+        None,
+        "--head",
+        help="Alembic head on which to base the revision (required for multiple heads)",
+    ),
     path: Path = typer.Option(Path("."), "--path", help="Project root"),
 ) -> None:
     """Autogenerate a migration from model changes."""
     project = _require_project(path)
     print_info("Creating migration", {"message": message})
-    code = _alembic(project, "revision", "--autogenerate", "-m", message)
+    args = [
+        "revision",
+        "--autogenerate",
+        "-m",
+        message,
+        "--version-path",
+        "alembic/versions",
+    ]
+    if head is not None:
+        args.extend(("--head", head))
+    code = _alembic(project, *args)
     if code == 0:
         print_success("Migration created.", detail="Review it, then: calango db migrate")
+    else:
+        print_error(
+            "Migration was not created.",
+            hint="For multiple heads, rerun with --head <revision>.",
+        )
     raise typer.Exit(code)
 
 

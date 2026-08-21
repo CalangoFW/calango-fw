@@ -115,6 +115,19 @@ def test_new_creates_alembic_env(tmp_path):
     assert (tmp_path / "my-api" / "alembic" / "env.py").is_file()
 
 
+def test_new_creates_standard_alembic_revision_template(tmp_path):
+    """Generated projects include the template Alembic executes for revisions."""
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+
+    template = tmp_path / "my-api" / "alembic" / "script.py.mako"
+
+    assert template.is_file()
+    content = template.read_text()
+    assert "revision: str = ${repr(up_revision)}" in content
+    assert "def upgrade() -> None:" in content
+    assert "def downgrade() -> None:" in content
+
+
 def test_new_creates_alembic_ini(tmp_path):
     """calango new creates alembic.ini."""
     runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])

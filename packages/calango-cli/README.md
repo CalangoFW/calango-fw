@@ -30,6 +30,8 @@ calango generate agent Support
 ### Database
 
 ```bash
+calango db revision -m "add orders"  # writes to local alembic/versions
+calango db revision -m "add orders" --head <revision>  # required for multiple heads
 calango db migrate          # uv run alembic upgrade heads
 calango db seed             # runs app/seeds/ in order
 calango db rollback         # one revision on every current branch

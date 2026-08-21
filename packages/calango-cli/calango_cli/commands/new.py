@@ -28,6 +28,7 @@ _TEMPLATE_FILES = [
     ("tests/__init__.py.jinja", "tests/__init__.py"),
     ("tests/conftest.py.jinja", "tests/conftest.py"),
     ("alembic/env.py.jinja", "alembic/env.py"),
+    ("alembic/script.py.mako.jinja", "alembic/script.py.mako"),
     ("alembic/versions/.gitkeep.jinja", "alembic/versions/.gitkeep"),
     ("alembic.ini.jinja", "alembic.ini"),
     ("Dockerfile.jinja", "Dockerfile"),

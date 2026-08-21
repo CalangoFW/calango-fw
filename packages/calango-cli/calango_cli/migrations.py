@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import ast
 import heapq
+import re
 import shutil
 from collections.abc import Iterable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from importlib.resources import as_file
+from importlib.resources.abc import Traversable
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import TracebackType
 from typing import TYPE_CHECKING
 
 from calango_plugin_base import PluginMigration
@@ -18,16 +22,92 @@ if TYPE_CHECKING:
 
 __all__ = [
     "MigrationConfigurationError",
+    "MigrationResources",
     "order_migrations",
+    "own_version_locations",
     "refresh_alembic_script",
+    "release_version_locations",
+    "validate_migration_descriptors",
     "version_locations",
 ]
 
-_materialized_resources: list[TemporaryDirectory[str]] = []
+_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
+_RESOURCE_OWNER_KEY = "calango.migration_resources"
 
 
 class MigrationConfigurationError(ValueError):
     """Raised when plugin migration contributions cannot form a valid graph."""
+
+
+class MigrationResources(AbstractContextManager["MigrationResources"]):
+    """Own temporary plugin migration copies for one bounded operation."""
+
+    def __init__(self) -> None:
+        self._temporaries: list[tuple[str, TemporaryDirectory[str]]] = []
+        self._closed = False
+
+    def __enter__(self) -> MigrationResources:
+        if self._closed:
+            raise MigrationConfigurationError(
+                "migration resource context is closed. Create a new context and retry."
+            )
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool:
+        try:
+            self.close()
+        except MigrationConfigurationError:
+            if exc_type is None:
+                raise
+        return False
+
+    def create_temporary_directory(self, name: str) -> Path:
+        """Create and own one temporary directory for a validated plugin."""
+        if self._closed:
+            raise MigrationConfigurationError(
+                "migration resource context is closed. Create a new context and retry."
+            )
+        try:
+            temporary = TemporaryDirectory(prefix="calango-plugin-migrations-")
+        except Exception:
+            raise _plugin_error(name, "could not create temporary migration storage") from None
+        self._temporaries.append((name, temporary))
+        return Path(temporary.name)
+
+    def release(self, directory: Path) -> None:
+        """Release one owned directory early after a failed materialization."""
+        for index, (name, temporary) in enumerate(self._temporaries):
+            if Path(temporary.name) != directory:
+                continue
+            self._temporaries.pop(index)
+            try:
+                temporary.cleanup()
+            except Exception:
+                raise _plugin_error(name, "could not clean temporary migration storage") from None
+            return
+
+    def close(self) -> None:
+        """Remove every owned resource; repeated close calls are safe."""
+        if self._closed:
+            return
+        self._closed = True
+        cleanup_name: str | None = None
+        while self._temporaries:
+            name, temporary = self._temporaries.pop()
+            try:
+                temporary.cleanup()
+            except Exception:
+                cleanup_name = cleanup_name or name
+        if cleanup_name is not None:
+            raise _plugin_error(
+                cleanup_name,
+                "could not clean temporary migration storage",
+            ) from None
 
 
 @dataclass(frozen=True)
@@ -41,21 +121,22 @@ def order_migrations(
     items: Iterable[PluginMigration],
 ) -> tuple[PluginMigration, ...]:
     """Return plugin migrations in deterministic dependency-first order."""
+    descriptors = validate_migration_descriptors(items)
     by_name: dict[str, PluginMigration] = {}
-    for position, item in enumerate(items):
-        if not isinstance(item, PluginMigration):
-            raise MigrationConfigurationError(
-                f"invalid plugin migration descriptor at position {position}"
-            )
+    for item in descriptors:
         if item.name in by_name:
-            raise MigrationConfigurationError(f"duplicate plugin migration name '{item.name}'")
+            raise MigrationConfigurationError(
+                f"duplicate plugin migration name '{item.name}'. "
+                "Remove the duplicate plugin contribution, then retry."
+            )
         by_name[item.name] = item
 
     for name in sorted(by_name):
         for dependency in sorted(set(by_name[name].depends_on)):
             if dependency not in by_name:
                 raise MigrationConfigurationError(
-                    f"plugin migration '{name}' depends on missing plugin '{dependency}'"
+                    f"plugin migration '{name}' depends on missing plugin '{dependency}'. "
+                    f"Install or enable plugin '{dependency}', then retry."
                 )
 
     dependencies = {name: set(item.depends_on) for name, item in by_name.items()}
@@ -78,25 +159,33 @@ def order_migrations(
 
     if len(ordered) != len(by_name):
         cyclic = ", ".join(sorted(name for name, required in dependencies.items() if required))
-        raise MigrationConfigurationError(f"plugin migration dependency cycle detected: {cyclic}")
+        raise MigrationConfigurationError(
+            f"plugin migration dependency cycle detected: {cyclic}. "
+            "Update or reinstall the named plugins, then retry."
+        )
 
+    for item in descriptors:
+        _validate_versions(item)
     return tuple(ordered)
 
 
-def version_locations(items: Iterable[PluginMigration]) -> tuple[Path, ...]:
+def validate_migration_descriptors(
+    items: Iterable[PluginMigration],
+) -> tuple[PluginMigration, ...]:
+    """Validate descriptor fields without accessing contributed resources."""
+    return _descriptor_tuple(items)
+
+
+def version_locations(
+    items: Iterable[PluginMigration],
+    *,
+    resources: MigrationResources,
+) -> tuple[Path, ...]:
     """Materialize versions and encode plugin dependencies as Alembic edges."""
     ordered = order_migrations(items)
     locations: dict[str, Path] = {}
     for item in ordered:
-        if isinstance(item.versions, Path):
-            location = item.versions
-        else:
-            location = _materialize(item)
-        if not location.is_dir():
-            raise MigrationConfigurationError(
-                f"plugin migration '{item.name}' versions directory is missing: {location}"
-            )
-        locations[item.name] = location
+        locations[item.name] = _materialize(item, resources)
 
     revisions = {item.name: _read_revisions(item.name, locations[item.name]) for item in ordered}
     heads = {
@@ -112,10 +201,8 @@ def version_locations(items: Iterable[PluginMigration]) -> tuple[Path, ...]:
             revision for dependency in item.depends_on for revision in heads[dependency]
         )
         if not roots or not required_heads:
-            raise MigrationConfigurationError(
-                f"plugin migration '{item.name}' cannot encode dependencies without revisions"
-            )
-        overlay = _copy_versions(item.name, locations[item.name])
+            raise _plugin_error(item.name, "cannot encode dependencies without revisions")
+        overlay = _copy_versions(item.name, locations[item.name], resources)
         for root in roots:
             path = overlay / root.path.relative_to(locations[item.name])
             down_revisions = _maximal_revisions(
@@ -129,6 +216,29 @@ def version_locations(items: Iterable[PluginMigration]) -> tuple[Path, ...]:
     return tuple(locations[item.name] for item in ordered)
 
 
+def own_version_locations(
+    config: Config,
+    items: Iterable[PluginMigration],
+) -> tuple[Path, ...]:
+    """Attach one migration resource owner to an Alembic Config for its full run."""
+    release_version_locations(config)
+    resources = MigrationResources()
+    try:
+        locations = version_locations(items, resources=resources)
+    except Exception:
+        resources.close()
+        raise
+    config.attributes[_RESOURCE_OWNER_KEY] = resources
+    return locations
+
+
+def release_version_locations(config: Config) -> None:
+    """Release plugin migration resources owned by an Alembic Config."""
+    owner = config.attributes.pop(_RESOURCE_OWNER_KEY, None)
+    if isinstance(owner, MigrationResources):
+        owner.close()
+
+
 def refresh_alembic_script(config: Config, script: ScriptDirectory) -> None:
     """Reload the command's ScriptDirectory after dynamic locations are configured."""
     from alembic.script import ScriptDirectory
@@ -138,46 +248,114 @@ def refresh_alembic_script(config: Config, script: ScriptDirectory) -> None:
     script.revision_map = refreshed.revision_map
 
 
-def _materialize(item: PluginMigration) -> Path:
-    temporary = TemporaryDirectory(prefix=f"calango-{item.name}-migrations-")
+def _descriptor_tuple(items: Iterable[PluginMigration]) -> tuple[PluginMigration, ...]:
+    try:
+        descriptors = tuple(items)
+    except Exception:
+        raise MigrationConfigurationError(
+            "could not enumerate plugin migration descriptors. "
+            "Update or reinstall the configured plugins, then retry."
+        ) from None
+    for position, item in enumerate(descriptors):
+        if type(item) is not PluginMigration:
+            raise MigrationConfigurationError(
+                f"invalid plugin migration descriptor at position {position}. "
+                "Update or reinstall the contributing plugin, then retry."
+            )
+        if type(item.name) is not str or _IDENTIFIER.fullmatch(item.name) is None:
+            raise MigrationConfigurationError(
+                "invalid plugin migration name. Use a nonempty identifier containing only "
+                "letters, numbers, underscores, or hyphens."
+            )
+        if not isinstance(item.depends_on, tuple):
+            raise _plugin_error(item.name, "depends_on must be a tuple")
+        seen: set[str] = set()
+        for dependency in item.depends_on:
+            if type(dependency) is not str or _IDENTIFIER.fullmatch(dependency) is None:
+                raise _plugin_error(item.name, "has an invalid dependency identifier")
+            if dependency in seen:
+                raise _plugin_error(item.name, "has a duplicate dependency")
+            if dependency == item.name:
+                raise _plugin_error(item.name, "cannot depend on itself")
+            seen.add(dependency)
+        try:
+            valid_versions = isinstance(item.versions, Traversable)
+        except Exception:
+            valid_versions = False
+        if not valid_versions:
+            raise _plugin_error(item.name, "has an invalid versions resource")
+    return descriptors
+
+
+def _validate_versions(item: PluginMigration) -> None:
+    try:
+        if not item.versions.is_dir():
+            raise _plugin_error(item.name, "versions directory is unavailable or unreadable")
+        children = tuple(item.versions.iterdir())
+        for child in children:
+            if child.is_file() and child.name.endswith(".py"):
+                child.read_bytes()
+    except MigrationConfigurationError:
+        raise
+    except Exception:
+        raise _plugin_error(
+            item.name,
+            "versions directory is unavailable or unreadable",
+        ) from None
+
+
+def _materialize(item: PluginMigration, resources: MigrationResources) -> Path:
+    temporary = resources.create_temporary_directory(item.name)
+    location = temporary / "versions"
     try:
         with as_file(item.versions) as extracted:
-            location = Path(temporary.name, item.versions.name)
             shutil.copytree(extracted, location)
-    except (OSError, TypeError) as exc:
-        temporary.cleanup()
-        raise MigrationConfigurationError(
-            f"could not materialize versions for plugin migration '{item.name}'"
-        ) from exc
-    _materialized_resources.append(temporary)
+    except Exception:
+        try:
+            resources.release(temporary)
+        except MigrationConfigurationError:
+            pass
+        raise _plugin_error(item.name, "versions could not be materialized") from None
     return location
 
 
-def _copy_versions(name: str, source: Path) -> Path:
-    temporary = TemporaryDirectory(prefix=f"calango-{name}-graph-")
-    destination = Path(temporary.name, source.name)
+def _copy_versions(
+    name: str,
+    source: Path,
+    resources: MigrationResources,
+) -> Path:
+    temporary = resources.create_temporary_directory(name)
+    destination = temporary / "versions"
     try:
         shutil.copytree(source, destination)
-    except OSError as exc:
-        temporary.cleanup()
-        raise MigrationConfigurationError(
-            f"could not build migration graph for plugin '{name}'"
-        ) from exc
-    _materialized_resources.append(temporary)
+    except Exception:
+        try:
+            resources.release(temporary)
+        except MigrationConfigurationError:
+            pass
+        raise _plugin_error(name, "migration dependency overlay could not be built") from None
     return destination
+
+
+def _plugin_error(name: str, problem: str) -> MigrationConfigurationError:
+    return MigrationConfigurationError(
+        f"plugin migration '{name}' {problem}. Update or reinstall plugin '{name}', then retry."
+    )
 
 
 def _read_revisions(name: str, location: Path) -> tuple[_RevisionInfo, ...]:
     revisions: list[_RevisionInfo] = []
-    for path in sorted(location.glob("*.py")):
+    try:
+        paths = sorted(location.glob("*.py"))
+    except Exception:
+        raise _plugin_error(name, "revisions could not be inspected") from None
+    for path in paths:
         try:
             tree = ast.parse(path.read_text(), filename=str(path))
             revision = _literal_assignment(tree, "revision")
             down_revision = _literal_assignment(tree, "down_revision")
-        except (OSError, SyntaxError, TypeError, ValueError) as exc:
-            raise MigrationConfigurationError(
-                f"could not inspect revisions for plugin migration '{name}'"
-            ) from exc
+        except (OSError, SyntaxError, TypeError, ValueError):
+            raise _plugin_error(name, "revisions could not be inspected") from None
         if revision is None:
             continue
         if not isinstance(revision, str) or not (
@@ -188,9 +366,7 @@ def _read_revisions(name: str, location: Path) -> tuple[_RevisionInfo, ...]:
                 and all(isinstance(item, str) for item in down_revision)
             )
         ):
-            raise MigrationConfigurationError(
-                f"plugin migration '{name}' has invalid revision metadata in '{path.name}'"
-            )
+            raise _plugin_error(name, "has invalid revision metadata")
         if down_revision is None:
             down_revisions: tuple[str, ...] = ()
         elif isinstance(down_revision, str):
@@ -221,7 +397,7 @@ def _revision_roots(name: str, revisions: tuple[_RevisionInfo, ...]) -> tuple[_R
     revision_ids = {item.revision for item in revisions}
     roots = tuple(item for item in revisions if not revision_ids.intersection(item.down_revisions))
     if revisions and not roots:
-        raise MigrationConfigurationError(f"plugin migration '{name}' has no revision root")
+        raise _plugin_error(name, "has no revision root")
     return roots
 
 
@@ -229,7 +405,7 @@ def _revision_heads(name: str, revisions: tuple[_RevisionInfo, ...]) -> tuple[st
     referenced = {down_revision for item in revisions for down_revision in item.down_revisions}
     heads = tuple(sorted(item.revision for item in revisions if item.revision not in referenced))
     if revisions and not heads:
-        raise MigrationConfigurationError(f"plugin migration '{name}' has no revision head")
+        raise _plugin_error(name, "has no revision head")
     return heads
 
 
@@ -288,7 +464,5 @@ def _replace_down_revision(name: str, path: Path, revisions: tuple[str, ...]) ->
         lines = source.splitlines(keepends=True)
         lines[node.lineno - 1 : node.end_lineno] = [f"down_revision = {value!r}\n"]
         path.write_text("".join(lines))
-    except (OSError, StopIteration, SyntaxError) as exc:
-        raise MigrationConfigurationError(
-            f"could not encode Alembic dependency for plugin migration '{name}'"
-        ) from exc
+    except (OSError, StopIteration, SyntaxError, TypeError, ValueError):
+        raise _plugin_error(name, "Alembic dependency could not be encoded") from None

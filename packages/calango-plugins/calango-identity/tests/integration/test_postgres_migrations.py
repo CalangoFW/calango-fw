@@ -19,7 +19,7 @@ from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import create_async_engine
 from tests.conftest import TEST_PRIVATE_KEY, TEST_PUBLIC_KEY
 
-from calango_cli.migrations import version_locations
+from calango_cli.migrations import MigrationResources, version_locations
 
 IDENTITY_TABLES = {
     "identity_permissions",
@@ -29,6 +29,12 @@ IDENTITY_TABLES = {
     "identity_users",
 }
 POSTGRES_URL_ENV = "CALANGO_TEST_POSTGRES_URL"
+
+
+@pytest.fixture
+def migration_resources():
+    with MigrationResources() as resources:
+        yield resources
 
 
 def test_identity_plugin_entry_point_is_installed():
@@ -143,12 +149,12 @@ def _run_alembic(
     getattr(command, command_name)(config, revision)
 
 
-async def test_identity_upgrade_and_downgrade(postgres_url):
+async def test_identity_upgrade_and_downgrade(postgres_url, migration_resources):
     plugin = IdentityPlugin(
         settings=IdentitySettings(PRIVATE_KEY=TEST_PRIVATE_KEY, PUBLIC_KEY=TEST_PUBLIC_KEY),
         refresh_store=InMemoryRefreshTokenStore(),
     )
-    versions = version_locations(plugin.migrations())[0]
+    versions = version_locations(plugin.migrations(), resources=migration_resources)[0]
 
     await asyncio.to_thread(_run_alembic, postgres_url, "upgrade", "heads", versions)
     assert await _table_names(postgres_url) >= IDENTITY_TABLES
@@ -157,7 +163,11 @@ async def test_identity_upgrade_and_downgrade(postgres_url):
     assert not (await _table_names(postgres_url) & IDENTITY_TABLES)
 
 
-async def test_plugin_dependency_executes_after_required_plugin(postgres_url, tmp_path):
+async def test_plugin_dependency_executes_after_required_plugin(
+    postgres_url,
+    tmp_path,
+    migration_resources,
+):
     base_versions = tmp_path / "base_versions"
     dependent_versions = tmp_path / "dependent_versions"
     independent_versions = tmp_path / "independent_versions"
@@ -238,7 +248,7 @@ async def test_plugin_dependency_executes_after_required_plugin(postgres_url, tm
         PluginMigration("required", required_versions, ()),
         PluginMigration("base", base_versions, ()),
     )
-    locations = version_locations(items)
+    locations = version_locations(items, resources=migration_resources)
 
     await asyncio.to_thread(_run_alembic, postgres_url, "upgrade", "heads", locations)
     engine = create_async_engine(postgres_url)
@@ -297,7 +307,11 @@ async def test_plugin_dependency_executes_after_required_plugin(postgres_url, tm
     await asyncio.to_thread(_run_alembic, postgres_url, "downgrade", "base", locations)
 
 
-async def test_redundant_plugin_dependency_rolls_back_only_dependent(postgres_url, tmp_path):
+async def test_redundant_plugin_dependency_rolls_back_only_dependent(
+    postgres_url,
+    tmp_path,
+    migration_resources,
+):
     versions_by_name = {name: tmp_path / f"{name}_versions" for name in ("a", "b", "c")}
     for location in versions_by_name.values():
         location.mkdir()
@@ -335,7 +349,8 @@ async def test_redundant_plugin_dependency_rolls_back_only_dependent(postgres_ur
             PluginMigration("a", versions_by_name["a"], ()),
             PluginMigration("b", versions_by_name["b"], ("a",)),
             PluginMigration("c", versions_by_name["c"], ("a", "b")),
-        )
+        ),
+        resources=migration_resources,
     )
 
     await asyncio.to_thread(_run_alembic, postgres_url, "upgrade", "heads", locations)
