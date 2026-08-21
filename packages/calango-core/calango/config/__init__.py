@@ -1,9 +1,40 @@
 from __future__ import annotations
 
-from typing import Literal
+import os
+import warnings
+from typing import Any, Literal
 
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, TypeAdapter, ValidationError
+from pydantic.fields import FieldInfo
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
+
+_LEGACY_TOP_LEVEL_NAMES = ("APP_NAME", "VERSION", "ENV", "DEBUG")
+
+
+class _LegacyTopLevelEnvironmentSource(PydanticBaseSettingsSource):
+    """Load legacy top-level environment variables after namespaced sources."""
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        return None, field_name, False
+
+    def __call__(self) -> dict[str, str]:
+        values: dict[str, str] = {}
+        for name in _LEGACY_TOP_LEVEL_NAMES:
+            if name not in self.current_state and name in os.environ:
+                value = os.environ[name]
+                try:
+                    TypeAdapter(self.settings_cls.model_fields[name].annotation).validate_python(
+                        value
+                    )
+                except ValidationError:
+                    continue
+                warnings.warn(
+                    f"{name} is deprecated; use CALANGO_{name}",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                values[name] = value
+        return values
 
 
 class DatabaseSettings(BaseSettings):
@@ -43,7 +74,25 @@ class CalangoSettings(BaseSettings):
     security: SecuritySettings
 
     model_config = SettingsConfigDict(
+        env_prefix="CALANGO_",
         env_file=".env",
         env_nested_delimiter="__",
         extra="ignore",
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            _LegacyTopLevelEnvironmentSource(settings_cls),
+            file_secret_settings,
+        )

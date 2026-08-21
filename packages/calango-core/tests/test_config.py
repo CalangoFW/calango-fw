@@ -67,3 +67,19 @@ class TestCalangoSettings:
             security=SecuritySettings(SECRET_KEY="test-key"),
         )
         assert settings.APP_NAME == "Minha API"
+
+
+def test_calango_prefix_wins(monkeypatch):
+    monkeypatch.setenv("DEBUG", "release")
+    monkeypatch.setenv("CALANGO_DEBUG", "true")
+    value = CalangoSettings(security=SecuritySettings(SECRET_KEY="test"))
+    assert value.DEBUG is True
+
+
+def test_legacy_name_warns_without_value(monkeypatch):
+    monkeypatch.delenv("CALANGO_APP_NAME", raising=False)
+    monkeypatch.setenv("APP_NAME", "legacy-secret-like-value")
+    with pytest.warns(DeprecationWarning, match="APP_NAME") as records:
+        value = CalangoSettings(security=SecuritySettings(SECRET_KEY="test"))
+    assert value.APP_NAME == "legacy-secret-like-value"
+    assert "legacy-secret-like-value" not in str(records[0].message)
