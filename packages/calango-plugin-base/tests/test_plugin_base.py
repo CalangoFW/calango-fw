@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
 from typing import ClassVar
 
-from calango_plugin_base import PluginBase
+import pytest
+from calango_plugin_base import PluginBase, PluginMigration
 from fastapi import FastAPI
 from pydantic_settings import BaseSettings
 
@@ -13,8 +15,8 @@ class ValidPlugin:
     requires: ClassVar[list[str]] = []
 
     def register(self, app: FastAPI) -> None: ...
-    def migrations(self) -> list[str]:
-        return []
+    def migrations(self) -> tuple[PluginMigration, ...]:
+        return ()
 
     def settings(self) -> type[BaseSettings]:
         return BaseSettings
@@ -60,3 +62,11 @@ def test_valid_plugin_name_attribute():
 def test_valid_plugin_version_attribute():
     """Plugin has version attribute."""
     assert ValidPlugin().version == "1.0.0"
+
+
+def test_plugin_migration_is_immutable(tmp_path):
+    """PluginMigration contributions cannot be changed after declaration."""
+    item = PluginMigration("identity", tmp_path, ())
+
+    with pytest.raises(FrozenInstanceError):
+        item.name = "changed"  # ty: ignore[invalid-assignment]  # intentional immutability check

@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from typing import ClassVar
 
 import pytest
+from calango_plugin_base import PluginMigration
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
@@ -306,8 +307,8 @@ def test_include_plugin_calls_register():
         def register(self, app) -> None:
             FakePlugin.registered_with = app
 
-        def migrations(self) -> list[str]:
-            return []
+        def migrations(self) -> tuple[PluginMigration, ...]:
+            return ()
 
         def settings(self) -> type[BaseSettings]:
             return BaseSettings
@@ -342,8 +343,8 @@ def test_include_plugin_accepts_valid_plugin():
 
         def register(self, app) -> None: ...
 
-        def migrations(self) -> list[str]:
-            return []
+        def migrations(self) -> tuple[PluginMigration, ...]:
+            return ()
 
         def settings(self) -> type[BaseSettings]:
             return BaseSettings
