@@ -99,6 +99,127 @@ class TestCalangoFactory:
 
         assert events == ["startup", "shutdown"]
 
+    def test_plugin_lifespans_wrap_user_lifespan_and_close_in_reverse_order(self, settings):
+        events = []
+
+        @asynccontextmanager
+        async def first_plugin(app):
+            assert app.database.started
+            events.append("first-start")
+            try:
+                yield
+            finally:
+                events.append("first-stop")
+
+        @asynccontextmanager
+        async def second_plugin(app):
+            assert app.database.started
+            events.append("second-start")
+            try:
+                yield
+            finally:
+                events.append("second-stop")
+
+        @asynccontextmanager
+        async def lifespan(app):
+            events.append("user-start")
+            yield
+            events.append("user-stop")
+
+        app = Calango(settings=settings, lifespan=lifespan)
+        app.add_plugin_lifespan(first_plugin)
+        app.add_plugin_lifespan(second_plugin)
+
+        with TestClient(app):
+            events.append("request")
+
+        assert events == [
+            "first-start",
+            "second-start",
+            "user-start",
+            "request",
+            "user-stop",
+            "second-stop",
+            "first-stop",
+        ]
+        assert not app.database.started
+
+    def test_plugin_lifespan_registration_is_rejected_after_startup(self, settings):
+        @asynccontextmanager
+        async def plugin_lifespan(_app):
+            yield
+
+        app = Calango(settings=settings)
+
+        with TestClient(app):
+            with pytest.raises(RuntimeError, match="startup"):
+                app.add_plugin_lifespan(plugin_lifespan)
+
+        with pytest.raises(RuntimeError, match="startup"):
+            app.add_plugin_lifespan(plugin_lifespan)
+
+    def test_plugin_startup_exception_closes_entered_resources_and_database(self, settings):
+        events = []
+
+        @asynccontextmanager
+        async def entered_plugin(_app):
+            events.append("entered-start")
+            try:
+                yield
+            finally:
+                events.append("entered-stop")
+
+        @asynccontextmanager
+        async def failing_plugin(_app):
+            events.append("failing-start")
+            raise RuntimeError("plugin startup failed")
+            yield
+
+        app = Calango(settings=settings)
+        app.add_plugin_lifespan(entered_plugin)
+        app.add_plugin_lifespan(failing_plugin)
+
+        with pytest.raises(RuntimeError, match="plugin startup failed"):
+            with TestClient(app):
+                pass
+
+        assert events == ["entered-start", "failing-start", "entered-stop"]
+        assert not app.database.started
+
+    def test_user_shutdown_exception_closes_plugin_and_database(self, settings):
+        events = []
+
+        @asynccontextmanager
+        async def plugin_lifespan(_app):
+            events.append("plugin-start")
+            try:
+                yield
+            finally:
+                events.append("plugin-stop")
+
+        @asynccontextmanager
+        async def lifespan(_app):
+            events.append("user-start")
+            yield
+            events.append("user-stop")
+            raise RuntimeError("user shutdown failed")
+
+        app = Calango(settings=settings, lifespan=lifespan)
+        app.add_plugin_lifespan(plugin_lifespan)
+
+        with pytest.raises(RuntimeError, match="user shutdown failed"):
+            with TestClient(app):
+                events.append("request")
+
+        assert events == [
+            "plugin-start",
+            "user-start",
+            "request",
+            "user-stop",
+            "plugin-stop",
+        ]
+        assert not app.database.started
+
 
 class TestCalangoMiddleware:
     def test_toda_response_tem_request_id(self, app, client):

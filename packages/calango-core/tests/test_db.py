@@ -69,6 +69,28 @@ async def test_runtime_uses_injected_session_dependency(settings: CalangoSetting
     assert [item async for item in runtime.session()] == [session]
 
 
+async def test_closing_runtime_session_closes_injected_generator(
+    settings: CalangoSettings,
+) -> None:
+    session = object()
+    dependency_closed = False
+
+    async def session_dependency():
+        nonlocal dependency_closed
+        try:
+            yield session
+        finally:
+            dependency_closed = True
+
+    runtime = DatabaseRuntime(settings, session_dependency=session_dependency)
+    outer = runtime.session()
+
+    assert await anext(outer) is session
+    await outer.aclose()
+
+    assert dependency_closed
+
+
 async def test_get_db_delegates_to_request_application_runtime(
     settings: CalangoSettings,
 ) -> None:
@@ -82,6 +104,30 @@ async def test_get_db_delegates_to_request_application_runtime(
     request = Request({"type": "http", "app": app})
 
     assert [item async for item in get_db(request)] == [session]
+
+
+async def test_closing_get_db_closes_runtime_session(
+    settings: CalangoSettings,
+) -> None:
+    session = object()
+    dependency_closed = False
+
+    async def session_dependency():
+        nonlocal dependency_closed
+        try:
+            yield session
+        finally:
+            dependency_closed = True
+
+    runtime = DatabaseRuntime(settings, session_dependency=session_dependency)
+    app = type("App", (), {"database": runtime})()
+    request = Request({"type": "http", "app": app})
+    outer = get_db(request)
+
+    assert await anext(outer) is session
+    await outer.aclose()
+
+    assert dependency_closed
 
 
 def test_concrete_model_inherits_id_and_timestamps():

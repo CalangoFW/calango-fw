@@ -3,12 +3,14 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 import pytest
-from fastapi import APIRouter, FastAPI, Request, WebSocket
+from fastapi import APIRouter, Depends, FastAPI, Request, WebSocket
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.testclient import TestClient
+from starlette.routing import Mount
 
 from calango.config import CalangoSettings, SecuritySettings
 from calango.core.app import Calango
+from calango.core.guards import RequestGuardMiddleware
 from calango.exceptions import AuthenticationError
 
 
@@ -135,6 +137,40 @@ def test_guard_covers_private_mount_included_from_an_api_router(
     assert TestClient(app).get("/included-child/").status_code == 401
     assert len(selected_endpoints) == 1
     assert selected_endpoints[0] is not None
+
+
+def test_guard_covers_starlette_routes_and_mounts_added_after_router_inclusion(
+    app: Calango,
+) -> None:
+    router = APIRouter()
+    child = FastAPI()
+    guarded_paths = []
+
+    @child.get("/")
+    async def child_root() -> dict[str, bool]:
+        return {"ok": True}
+
+    async def deny(request: Request) -> None:
+        guarded_paths.append(request.url.path)
+        raise AuthenticationError("Authentication required")
+
+    app.add_request_guard(deny)
+    app.include_router(router, prefix="/included")
+
+    async def late_route(_request: Request) -> JSONResponse:
+        return JSONResponse({"ok": True})
+
+    router.add_route("/late-route", late_route)
+    router.mount("/late-mount", child)
+
+    client = TestClient(app)
+
+    assert client.get("/included/late-route").status_code == 401
+    assert client.get("/included/late-mount/").status_code == 401
+    assert guarded_paths == [
+        "/included/late-route",
+        "/included/late-mount/",
+    ]
 
 
 def test_include_router_does_not_mutate_router_reused_by_plain_fastapi(
@@ -295,6 +331,213 @@ def test_public_mount_skips_guard(app: Calango) -> None:
     assert guarded_endpoints == []
 
 
+def test_public_mount_policy_is_bound_to_the_exact_mount_instance(app: Calango) -> None:
+    private_child = FastAPI()
+    public_child = FastAPI()
+
+    @private_child.get("/")
+    async def private_root() -> dict[str, str]:
+        return {"mount": "private"}
+
+    @public_child.get("/")
+    async def public_root() -> dict[str, str]:
+        return {"mount": "public"}
+
+    async def deny(_request: Request) -> None:
+        raise AuthenticationError("Authentication required")
+
+    app.add_request_guard(deny)
+    app.mount("/collision", private_child)
+    app.mount("/collision", public_child, public=True)
+
+    assert TestClient(app).get("/collision/").status_code == 401
+
+
+@pytest.mark.parametrize(
+    ("scope", "routes", "public_mounts"),
+    [
+        (
+            {
+                "type": "http",
+                "method": "GET",
+                "path": "/missing",
+                "root_path": "",
+                "headers": [],
+                "query_string": b"",
+            },
+            [],
+            (),
+        ),
+        (
+            {
+                "type": "websocket",
+                "path": "/ws",
+                "root_path": "",
+                "headers": [],
+                "query_string": b"",
+                "scheme": "ws",
+            },
+            [],
+            (),
+        ),
+    ],
+    ids=["not-found", "websocket"],
+)
+async def test_unguarded_scopes_keep_original_receive(scope, routes, public_mounts) -> None:
+    receives_seen = []
+    guard_calls = []
+
+    async def downstream(_scope, receive, _send) -> None:
+        receives_seen.append(receive)
+
+    async def original_receive():
+        return {"type": "http.disconnect"}
+
+    async def send(_message) -> None:
+        pass
+
+    async def guard(request: Request) -> None:
+        guard_calls.append(request.url.path)
+
+    owner = type(
+        "GuardOwner",
+        (),
+        {"_request_guards": (guard,), "_dependency_request_guard": None},
+    )()
+    middleware = RequestGuardMiddleware(
+        downstream,
+        lambda: public_mounts,
+        lambda: routes,
+        owner,
+    )
+
+    await middleware(scope, original_receive, send)
+
+    assert receives_seen == [original_receive]
+    assert guard_calls == []
+
+
+async def test_public_mount_keeps_original_receive() -> None:
+    receives_seen = []
+    guard_calls = []
+
+    async def child(_scope, receive, _send) -> None:
+        receives_seen.append(receive)
+
+    async def original_receive():
+        return {"type": "http.disconnect"}
+
+    async def send(_message) -> None:
+        pass
+
+    async def guard(request: Request) -> None:
+        guard_calls.append(request.url.path)
+
+    mount = Mount("/public", app=child)
+    owner = type(
+        "GuardOwner",
+        (),
+        {"_request_guards": (guard,), "_dependency_request_guard": None},
+    )()
+    middleware = RequestGuardMiddleware(
+        child,
+        lambda: (mount,),
+        lambda: [mount],
+        owner,
+    )
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/public/resource",
+        "root_path": "",
+        "headers": [],
+        "query_string": b"",
+        "scheme": "http",
+    }
+
+    await middleware(scope, original_receive, send)
+
+    assert receives_seen == [original_receive]
+    assert guard_calls == []
+
+
+def test_dependency_request_guard_uses_fastapi_dependency_and_mount_resolver(
+    app: Calango,
+) -> None:
+    parse_calls = []
+    guard_contexts = []
+
+    def parse_token(request: Request) -> str | None:
+        parse_calls.append(request.url.path)
+        return request.headers.get("authorization")
+
+    async def token_dependency(request: Request) -> str | None:
+        return parse_token(request)
+
+    async def dependency_context(
+        token: str | None = Depends(token_dependency),
+    ) -> str | None:
+        return token
+
+    async def route_resolver(request: Request) -> str | None:
+        return parse_token(request)
+
+    async def require_token(request: Request, context: object) -> None:
+        guard_contexts.append((request.url.path, context))
+        if context != "Bearer allowed":
+            raise AuthenticationError("Authentication required")
+
+    @app.get("/api-route")
+    async def api_route() -> dict[str, bool]:
+        return {"ok": True}
+
+    async def starlette_route(_request: Request) -> JSONResponse:
+        return JSONResponse({"ok": True})
+
+    app.add_route("/starlette-route", starlette_route)
+
+    app.add_dependency_request_guard(
+        require_token,
+        dependency=dependency_context,
+        resolver=route_resolver,
+    )
+
+    child = FastAPI()
+
+    @child.get("/")
+    async def child_root() -> dict[str, bool]:
+        return {"ok": True}
+
+    app.mount("/mounted", child)
+    client = TestClient(app)
+
+    assert client.get("/api-route").status_code == 401
+    assert client.get("/api-route", headers={"Authorization": "Bearer allowed"}).status_code == 200
+    assert client.get("/starlette-route").status_code == 401
+    assert (
+        client.get("/starlette-route", headers={"Authorization": "Bearer allowed"}).status_code
+        == 200
+    )
+    assert client.get("/mounted/").status_code == 401
+    assert client.get("/mounted/", headers={"Authorization": "Bearer allowed"}).status_code == 200
+    assert parse_calls == [
+        "/api-route",
+        "/api-route",
+        "/starlette-route",
+        "/starlette-route",
+        "/mounted/",
+        "/mounted/",
+    ]
+    assert guard_contexts == [
+        ("/api-route", None),
+        ("/api-route", "Bearer allowed"),
+        ("/starlette-route", None),
+        ("/starlette-route", "Bearer allowed"),
+        ("/mounted/", None),
+        ("/mounted/", "Bearer allowed"),
+    ]
+
+
 def test_private_mount_preserves_root_path_and_streaming(app: Calango) -> None:
     child = FastAPI()
     guard_root_paths = []
@@ -340,6 +583,38 @@ def test_websocket_scope_is_not_guarded(app: Calango) -> None:
         assert socket.receive_text() == "ok"
 
     assert guard_calls == []
+
+
+def test_dependency_request_guard_does_not_resolve_for_websocket(app: Calango) -> None:
+    context_calls = []
+
+    async def dependency(request: Request) -> object:
+        context_calls.append(("dependency", request.url.path))
+        return object()
+
+    async def resolver(request: Request) -> object:
+        context_calls.append(("resolver", request.url.path))
+        return object()
+
+    async def guard(request: Request, _context: object) -> None:
+        context_calls.append(("guard", request.url.path))
+
+    app.add_dependency_request_guard(
+        guard,
+        dependency=dependency,
+        resolver=resolver,
+    )
+
+    @app.websocket("/dependency-ws")
+    async def websocket(socket: WebSocket) -> None:
+        await socket.accept()
+        await socket.send_text("ok")
+        await socket.close()
+
+    with TestClient(app).websocket_connect("/dependency-ws") as socket:
+        assert socket.receive_text() == "ok"
+
+    assert context_calls == []
 
 
 def test_guard_registration_is_rejected_after_startup_begins(app: Calango) -> None:

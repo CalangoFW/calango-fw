@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from contextlib import aclosing
 from typing import TYPE_CHECKING
 
 from fastapi import Request
@@ -52,8 +53,14 @@ class DatabaseRuntime:
     async def session(self) -> AsyncGenerator[AsyncSession, None]:
         """Yield a session from the injected dependency or owned factory."""
         if self._session_dependency is not None:
-            async for session in self._session_dependency():
-                yield session
+            sessions = self._session_dependency()
+            try:
+                async for session in sessions:
+                    yield session
+            finally:
+                close = getattr(sessions, "aclose", None)
+                if close is not None:
+                    await close()
             return
 
         if self._maker is None:
@@ -72,5 +79,6 @@ class DatabaseRuntime:
 
 async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
     """Yield a session from the database runtime owned by the request's app."""
-    async for session in request.app.database.session():
-        yield session
+    async with aclosing(request.app.database.session()) as sessions:
+        async for session in sessions:
+            yield session
