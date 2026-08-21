@@ -42,7 +42,9 @@ class TestSecuritySettings:
 
 
 class TestCalangoSettings:
-    def test_defaults_de_aplicacao(self):
+    def test_defaults_de_aplicacao(self, monkeypatch):
+        for name in ("APP_NAME", "VERSION", "ENV", "DEBUG"):
+            monkeypatch.delenv(name, raising=False)
         settings = CalangoSettings(security=SecuritySettings(SECRET_KEY="test-key"))
         assert settings.APP_NAME == "Calango App"
         assert settings.VERSION == "0.1.0"
