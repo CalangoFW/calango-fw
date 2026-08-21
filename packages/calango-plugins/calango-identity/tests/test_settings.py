@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
+from typing import Any
 
 import pytest
 from calango_identity.settings import IdentitySettings
@@ -12,6 +14,31 @@ from tests.conftest import TEST_PRIVATE_KEY, TEST_PUBLIC_KEY
 @pytest.fixture
 def valid_keys() -> dict[str, str]:
     return {"PRIVATE_KEY": TEST_PRIVATE_KEY, "PUBLIC_KEY": TEST_PUBLIC_KEY}
+
+
+def _contains_secret_marker(value: Any, marker: str, seen: set[int] | None = None) -> bool:
+    """Recursively detect raw secret data, including reversible secret wrappers."""
+    if isinstance(value, str):
+        return marker in value
+
+    seen = seen or set()
+    if id(value) in seen:
+        return False
+    seen.add(id(value))
+
+    getter = getattr(value, "get_secret_value", None)
+    if callable(getter) and _contains_secret_marker(getter(), marker, seen):
+        return True
+    if isinstance(value, BaseException):
+        return any(
+            _contains_secret_marker(item, marker, seen)
+            for item in (value.args, value.__cause__, value.__context__)
+        )
+    if isinstance(value, Mapping):
+        return any(_contains_secret_marker(item, marker, seen) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_contains_secret_marker(item, marker, seen) for item in value)
+    return False
 
 
 def test_settings_requires_private_key():
@@ -82,9 +109,16 @@ def test_settings_rejects_invalid_pem_keys_without_exposing_inputs(
     with pytest.raises(ValidationError) as error:
         IdentitySettings(**(valid_keys | {field: secret_marker}))
 
+    assert field in str(error.value)
+    assert field in error.value.json()
     assert secret_marker not in str(error.value)
     assert secret_marker not in repr(error.value.errors())
     assert secret_marker not in error.value.json()
+    assert not _contains_secret_marker(error.value.errors(), secret_marker)
+    assert error.value.__cause__ is None
+    assert error.value.__context__ is None
+    assert not _contains_secret_marker(error.value.__cause__, secret_marker)
+    assert not _contains_secret_marker(error.value.__context__, secret_marker)
 
 
 def test_settings_representation_and_dumps_redact_rsa_keys(valid_keys):

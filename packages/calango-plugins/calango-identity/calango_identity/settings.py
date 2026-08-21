@@ -5,7 +5,8 @@ from typing import Any
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey, RSAPublicKey
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
+from pydantic_core import InitErrorDetails
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,7 +35,35 @@ class IdentitySettings(BaseSettings):
 
     def __init__(self, **values: Any) -> None:
         """Accept string-backed environment values while storing keys as secrets."""
-        super().__init__(**values)
+        sanitized_error: ValidationError | None = None
+        try:
+            super().__init__(**values)
+        except ValidationError as error:
+            sanitized_error = self._sanitize_validation_error(error)
+        if sanitized_error is not None:
+            raise sanitized_error
+
+    @staticmethod
+    def _sanitize_validation_error(error: ValidationError) -> ValidationError:
+        """Replace reversible RSA key inputs before an error crosses this boundary."""
+        sanitized_errors: list[InitErrorDetails] = []
+        for line_error in error.errors():
+            location = line_error["loc"]
+            sanitized_error: InitErrorDetails = {
+                "type": line_error["type"],
+                "loc": location,
+                "input": line_error["input"],
+            }
+            if "ctx" in line_error:
+                sanitized_error["ctx"] = line_error["ctx"]
+            if location and location[0] in {"PRIVATE_KEY", "PUBLIC_KEY"}:
+                sanitized_error["input"] = "<redacted>"
+            sanitized_errors.append(sanitized_error)
+        return ValidationError.from_exception_data(
+            error.title,
+            sanitized_errors,
+            hide_input=True,
+        )
 
     @model_validator(mode="before")
     @classmethod
