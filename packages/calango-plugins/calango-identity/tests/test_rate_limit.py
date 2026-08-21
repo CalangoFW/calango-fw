@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 import pytest
 from calango_identity.models import Base
 from calango_identity.plugin import IdentityPlugin
-from calango_identity.rate_limit import get_email_key, make_limiter
+from calango_identity.rate_limit import get_email_key, make_limiter, resolve_client_ip
 from calango_identity.refresh_tokens import InMemoryRefreshTokenStore
 from calango_identity.settings import IdentitySettings
 from fastapi import FastAPI, Request
@@ -18,10 +18,45 @@ from calango import Calango
 from tests.conftest import TEST_PRIVATE_KEY, TEST_PUBLIC_KEY
 
 
+def _request(client_host: str, forwarded_for: str | None = None) -> Request:
+    headers = [] if forwarded_for is None else [(b"x-forwarded-for", forwarded_for.encode())]
+    return Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/",
+            "headers": headers,
+            "client": (client_host, 12345),
+        }
+    )
+
+
 def test_make_limiter_returns_limiter():
     """make_limiter() returns a slowapi Limiter instance."""
     limiter = make_limiter("memory://")
     assert isinstance(limiter, Limiter)
+
+
+def test_forwarded_for_is_ignored_without_a_trusted_proxy():
+    """A client cannot select its rate-limit key by injecting a forwarding header."""
+    request = _request("198.51.100.10", "203.0.113.4")
+
+    assert resolve_client_ip(request, ()) == "198.51.100.10"
+
+
+def test_forwarded_for_uses_untrusted_client_behind_trusted_proxy_network():
+    """Trusted proxy chains resolve the first non-proxy address from the right."""
+    request = _request("10.0.0.2", "203.0.113.4, 10.0.0.1")
+
+    assert resolve_client_ip(request, ("10.0.0.0/8",)) == "203.0.113.4"
+
+
+def test_malformed_forwarded_for_falls_back_to_trusted_peer():
+    """Malformed forwarding data is never partially trusted for rate limiting."""
+    request = _request("192.0.2.10", "203.0.113.4, unknown")
+
+    assert resolve_client_ip(request, ("192.0.2.10",)) == "192.0.2.10"
 
 
 def test_get_email_key_returns_email_from_state():
