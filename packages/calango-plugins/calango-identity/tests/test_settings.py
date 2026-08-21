@@ -30,10 +30,17 @@ def _contains_secret_marker(value: Any, marker: str, seen: set[int] | None = Non
     if callable(getter) and _contains_secret_marker(getter(), marker, seen):
         return True
     if isinstance(value, BaseException):
-        return any(
+        if any(
             _contains_secret_marker(item, marker, seen)
             for item in (value.args, value.__cause__, value.__context__)
-        )
+        ):
+            return True
+        traceback = value.__traceback__
+        while traceback is not None:
+            if _contains_secret_marker(traceback.tb_frame.f_locals, marker, seen):
+                return True
+            traceback = traceback.tb_next
+        return False
     if isinstance(value, Mapping):
         return any(_contains_secret_marker(item, marker, seen) for item in value.values())
     if isinstance(value, (list, tuple, set)):
@@ -96,20 +103,29 @@ def test_settings_rejects_blank_refresh_token_key_prefix(valid_keys):
 
 
 @pytest.mark.parametrize(
-    ("field", "secret_marker"),
+    ("field", "secret_marker", "expected_message"),
     [
-        ("PRIVATE_KEY", "PRIVATE_KEY_SECRET_MARKER"),
-        ("PUBLIC_KEY", "PUBLIC_KEY_SECRET_MARKER"),
+        (
+            "PRIVATE_KEY",
+            "PRIVATE_KEY_SECRET_MARKER",
+            "PRIVATE_KEY must be a valid unencrypted PEM private key",
+        ),
+        (
+            "PUBLIC_KEY",
+            "PUBLIC_KEY_SECRET_MARKER",
+            "PUBLIC_KEY must be a valid PEM public key",
+        ),
     ],
 )
 def test_settings_rejects_invalid_pem_keys_without_exposing_inputs(
-    field, secret_marker, valid_keys
+    field, secret_marker, expected_message, valid_keys
 ):
     """Identity startup must reject a malformed signing or verification key."""
     with pytest.raises(ValidationError) as error:
         IdentitySettings(**(valid_keys | {field: secret_marker}))
 
     assert field in str(error.value)
+    assert expected_message in str(error.value)
     assert field in error.value.json()
     assert secret_marker not in str(error.value)
     assert secret_marker not in repr(error.value.errors())

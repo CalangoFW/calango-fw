@@ -6,7 +6,7 @@ from typing import Any
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey, RSAPublicKey
 from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
-from pydantic_core import InitErrorDetails
+from pydantic_core import InitErrorDetails, PydanticCustomError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -45,19 +45,30 @@ class IdentitySettings(BaseSettings):
 
     @staticmethod
     def _sanitize_validation_error(error: ValidationError) -> ValidationError:
-        """Replace reversible RSA key inputs before an error crosses this boundary."""
+        """Replace reversible RSA key data before an error crosses this boundary."""
         sanitized_errors: list[InitErrorDetails] = []
         for line_error in error.errors():
             location = line_error["loc"]
-            sanitized_error: InitErrorDetails = {
-                "type": line_error["type"],
-                "loc": location,
-                "input": line_error["input"],
+            is_key_error = bool(location) and location[0] in {
+                "PRIVATE_KEY",
+                "PUBLIC_KEY",
             }
-            if "ctx" in line_error:
+            is_key_value_error = is_key_error and line_error["type"] == "value_error"
+            sanitized_error: InitErrorDetails = {
+                "type": (
+                    PydanticCustomError(
+                        "value_error",
+                        "{message}",
+                        {"message": line_error["msg"]},
+                    )
+                    if is_key_value_error
+                    else line_error["type"]
+                ),
+                "loc": location,
+                "input": "<redacted>" if is_key_error else line_error["input"],
+            }
+            if not is_key_error and "ctx" in line_error:
                 sanitized_error["ctx"] = line_error["ctx"]
-            if location and location[0] in {"PRIVATE_KEY", "PUBLIC_KEY"}:
-                sanitized_error["input"] = "<redacted>"
             sanitized_errors.append(sanitized_error)
         return ValidationError.from_exception_data(
             error.title,
