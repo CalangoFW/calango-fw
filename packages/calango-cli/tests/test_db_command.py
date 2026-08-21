@@ -311,6 +311,35 @@ def test_version_locations_adds_effective_alembic_dependency_edges(tmp_path):
     assert scripts.get_revision("dependent_0001").down_revision == "base_0001"
 
 
+def test_version_locations_removes_transitively_redundant_parent(tmp_path):
+    locations_by_name = {name: tmp_path / f"{name}_versions" for name in ("a", "b", "c")}
+    for name, location in locations_by_name.items():
+        location.mkdir()
+        (location / f"0001_{name}.py").write_text(
+            f"revision = '{name}_0001'\n"
+            "down_revision = None\n"
+            "branch_labels = None\n"
+            "depends_on = None\n"
+        )
+    items = (
+        PluginMigration("a", locations_by_name["a"], ()),
+        PluginMigration("b", locations_by_name["b"], ("a",)),
+        PluginMigration("c", locations_by_name["c"], ("a", "b")),
+    )
+
+    locations = version_locations(items)
+    script_root = tmp_path / "alembic"
+    script_root.mkdir()
+    config = Config()
+    config.set_main_option("script_location", str(script_root))
+    config.set_main_option("version_locations", os.pathsep.join(map(str, locations)))
+    config.set_main_option("path_separator", "os")
+    scripts = ScriptDirectory.from_config(config)
+
+    assert scripts.get_revision("b_0001").down_revision == "a_0001"
+    assert scripts.get_revision("c_0001").down_revision == "b_0001"
+
+
 def test_generated_alembic_env_loads_plugins_before_metadata(monkeypatch, tmp_path):
     import calango_cli.migrations as migrations_module
 

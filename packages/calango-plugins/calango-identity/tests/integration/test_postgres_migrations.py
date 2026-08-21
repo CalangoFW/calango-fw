@@ -295,3 +295,77 @@ async def test_plugin_dependency_executes_after_required_plugin(postgres_url, tm
     assert labels == ("base",)
 
     await asyncio.to_thread(_run_alembic, postgres_url, "downgrade", "base", locations)
+
+
+async def test_redundant_plugin_dependency_rolls_back_only_dependent(postgres_url, tmp_path):
+    versions_by_name = {name: tmp_path / f"{name}_versions" for name in ("a", "b", "c")}
+    for location in versions_by_name.values():
+        location.mkdir()
+    (versions_by_name["a"] / "0001_a.py").write_text(
+        "from alembic import op\n"
+        "import sqlalchemy as sa\n"
+        "revision = 'a_0001'\n"
+        "down_revision = None\n"
+        "branch_labels = None\n"
+        "depends_on = None\n"
+        "def upgrade():\n"
+        "    op.create_table('redundant_dependency_order', "
+        "sa.Column('id', sa.Integer(), primary_key=True), "
+        "sa.Column('label', sa.String(8), nullable=False))\n"
+        '    op.execute("INSERT INTO redundant_dependency_order (id, label) VALUES (1, '
+        "'a')\")\n"
+        "def downgrade():\n"
+        "    op.drop_table('redundant_dependency_order')\n"
+    )
+    for index, name in enumerate(("b", "c"), start=2):
+        (versions_by_name[name] / f"0001_{name}.py").write_text(
+            "from alembic import op\n"
+            f"revision = '{name}_0001'\n"
+            "down_revision = None\n"
+            "branch_labels = None\n"
+            "depends_on = None\n"
+            "def upgrade():\n"
+            f'    op.execute("INSERT INTO redundant_dependency_order (id, label) '
+            f"VALUES ({index}, '{name}')\")\n"
+            "def downgrade():\n"
+            f'    op.execute("DELETE FROM redundant_dependency_order WHERE id = {index}")\n'
+        )
+    locations = version_locations(
+        (
+            PluginMigration("a", versions_by_name["a"], ()),
+            PluginMigration("b", versions_by_name["b"], ("a",)),
+            PluginMigration("c", versions_by_name["c"], ("a", "b")),
+        )
+    )
+
+    await asyncio.to_thread(_run_alembic, postgres_url, "upgrade", "heads", locations)
+    engine = create_async_engine(postgres_url)
+    try:
+        async with engine.connect() as connection:
+            labels = tuple(
+                await connection.run_sync(
+                    lambda sync: sync.exec_driver_sql(
+                        "SELECT label FROM redundant_dependency_order ORDER BY id"
+                    ).scalars()
+                )
+            )
+    finally:
+        await engine.dispose()
+    assert labels == ("a", "b", "c")
+
+    await asyncio.to_thread(_run_alembic, postgres_url, "downgrade", "c_0001@-1", locations)
+    engine = create_async_engine(postgres_url)
+    try:
+        async with engine.connect() as connection:
+            labels = tuple(
+                await connection.run_sync(
+                    lambda sync: sync.exec_driver_sql(
+                        "SELECT label FROM redundant_dependency_order ORDER BY id"
+                    ).scalars()
+                )
+            )
+    finally:
+        await engine.dispose()
+    assert labels == ("a", "b")
+
+    await asyncio.to_thread(_run_alembic, postgres_url, "downgrade", "base", locations)

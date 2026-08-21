@@ -118,9 +118,13 @@ def version_locations(items: Iterable[PluginMigration]) -> tuple[Path, ...]:
         overlay = _copy_versions(item.name, locations[item.name])
         for root in roots:
             path = overlay / root.path.relative_to(locations[item.name])
-            down_revisions = tuple(dict.fromkeys((*root.down_revisions, *required_heads)))
+            down_revisions = _maximal_revisions(
+                tuple(dict.fromkeys((*root.down_revisions, *required_heads))),
+                revisions,
+            )
             _replace_down_revision(item.name, path, down_revisions)
         locations[item.name] = overlay
+        revisions[item.name] = _read_revisions(item.name, overlay)
 
     return tuple(locations[item.name] for item in ordered)
 
@@ -227,6 +231,37 @@ def _revision_heads(name: str, revisions: tuple[_RevisionInfo, ...]) -> tuple[st
     if revisions and not heads:
         raise MigrationConfigurationError(f"plugin migration '{name}' has no revision head")
     return heads
+
+
+def _maximal_revisions(
+    candidates: tuple[str, ...],
+    revisions: dict[str, tuple[_RevisionInfo, ...]],
+) -> tuple[str, ...]:
+    parents = {
+        revision.revision: revision.down_revisions
+        for plugin_revisions in revisions.values()
+        for revision in plugin_revisions
+    }
+
+    def ancestors(revision: str) -> set[str]:
+        found: set[str] = set()
+        pending = list(parents.get(revision, ()))
+        while pending:
+            parent = pending.pop()
+            if parent in found:
+                continue
+            found.add(parent)
+            pending.extend(parents.get(parent, ()))
+        return found
+
+    ancestors_by_candidate = {candidate: ancestors(candidate) for candidate in candidates}
+    return tuple(
+        candidate
+        for candidate in candidates
+        if not any(
+            candidate in ancestors_by_candidate[other] for other in candidates if other != candidate
+        )
+    )
 
 
 def _replace_down_revision(name: str, path: Path, revisions: tuple[str, ...]) -> None:
