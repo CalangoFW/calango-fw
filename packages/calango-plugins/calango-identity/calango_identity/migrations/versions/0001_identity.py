@@ -7,7 +7,7 @@ Revises: None
 from __future__ import annotations
 
 import sqlalchemy as sa
-from alembic import op  # ty: ignore[unresolved-import]
+from alembic import op
 
 revision: str = "identity_0001"
 down_revision: str | None = None
