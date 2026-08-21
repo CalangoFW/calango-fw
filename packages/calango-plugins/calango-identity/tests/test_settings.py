@@ -10,6 +10,11 @@ from pydantic import ValidationError
 
 from tests.conftest import TEST_PRIVATE_KEY, TEST_PUBLIC_KEY
 
+_INVALID_KEY_MARKERS = {
+    "PRIVATE_KEY": "PRIVATE_KEY_SECRET_MARKER",
+    "PUBLIC_KEY": "PUBLIC_KEY_SECRET_MARKER",
+}
+
 
 @pytest.fixture
 def valid_keys() -> dict[str, str]:
@@ -21,7 +26,8 @@ def _contains_secret_marker(value: Any, marker: str, seen: set[int] | None = Non
     if isinstance(value, str):
         return marker in value
 
-    seen = seen or set()
+    if seen is None:
+        seen = set()
     if id(value) in seen:
         return False
     seen.add(id(value))
@@ -46,6 +52,11 @@ def _contains_secret_marker(value: Any, marker: str, seen: set[int] | None = Non
     if isinstance(value, (list, tuple, set)):
         return any(_contains_secret_marker(item, marker, seen) for item in value)
     return False
+
+
+def _assert_no_secret_marker(value: Any, marker: str) -> None:
+    """Assert without placing the marker in the exception's caller-frame locals."""
+    assert not _contains_secret_marker(value, marker)
 
 
 def test_settings_requires_private_key():
@@ -103,38 +114,36 @@ def test_settings_rejects_blank_refresh_token_key_prefix(valid_keys):
 
 
 @pytest.mark.parametrize(
-    ("field", "secret_marker", "expected_message"),
+    ("field", "expected_message"),
     [
         (
             "PRIVATE_KEY",
-            "PRIVATE_KEY_SECRET_MARKER",
             "PRIVATE_KEY must be a valid unencrypted PEM private key",
         ),
         (
             "PUBLIC_KEY",
-            "PUBLIC_KEY_SECRET_MARKER",
             "PUBLIC_KEY must be a valid PEM public key",
         ),
     ],
 )
 def test_settings_rejects_invalid_pem_keys_without_exposing_inputs(
-    field, secret_marker, expected_message, valid_keys
+    field, expected_message, valid_keys
 ):
     """Identity startup must reject a malformed signing or verification key."""
     with pytest.raises(ValidationError) as error:
-        IdentitySettings(**(valid_keys | {field: secret_marker}))
+        IdentitySettings(**(valid_keys | {field: _INVALID_KEY_MARKERS[field]}))
 
     assert field in str(error.value)
     assert expected_message in str(error.value)
     assert field in error.value.json()
-    assert secret_marker not in str(error.value)
-    assert secret_marker not in repr(error.value.errors())
-    assert secret_marker not in error.value.json()
-    assert not _contains_secret_marker(error.value.errors(), secret_marker)
+    assert _INVALID_KEY_MARKERS[field] not in str(error.value)
+    assert _INVALID_KEY_MARKERS[field] not in repr(error.value)
+    assert _INVALID_KEY_MARKERS[field] not in repr(error.value.errors())
+    assert _INVALID_KEY_MARKERS[field] not in error.value.json()
+    _assert_no_secret_marker(error.value.errors(), _INVALID_KEY_MARKERS[field])
+    _assert_no_secret_marker(error.value, _INVALID_KEY_MARKERS[field])
     assert error.value.__cause__ is None
     assert error.value.__context__ is None
-    assert not _contains_secret_marker(error.value.__cause__, secret_marker)
-    assert not _contains_secret_marker(error.value.__context__, secret_marker)
 
 
 def test_settings_representation_and_dumps_redact_rsa_keys(valid_keys):

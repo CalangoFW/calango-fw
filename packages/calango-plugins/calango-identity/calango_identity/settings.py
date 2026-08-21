@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 from ipaddress import ip_address, ip_network
-from typing import Any
+from typing import Any, Never
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey, RSAPublicKey
 from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
 from pydantic_core import InitErrorDetails, PydanticCustomError
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _raise_sanitized_validation_error(error: ValidationError) -> Never:
+    """Raise an error from a frame that has never handled raw settings input."""
+    raise error from None
 
 
 class IdentitySettings(BaseSettings):
@@ -35,13 +40,16 @@ class IdentitySettings(BaseSettings):
 
     def __init__(self, **values: Any) -> None:
         """Accept string-backed environment values while storing keys as secrets."""
-        sanitized_error: ValidationError | None = None
         try:
             super().__init__(**values)
-        except ValidationError as error:
-            sanitized_error = self._sanitize_validation_error(error)
-        if sanitized_error is not None:
-            raise sanitized_error
+        except ValidationError as original_error:
+            sanitized_error = self._sanitize_validation_error(original_error)
+        else:
+            return
+
+        values.clear()
+        del values
+        _raise_sanitized_validation_error(sanitized_error)
 
     @staticmethod
     def _sanitize_validation_error(error: ValidationError) -> ValidationError:
