@@ -84,11 +84,12 @@ class GuardedASGIApp:
 
 
 def guarded_router_overlay(router: APIRouter) -> APIRouter:
-    """Build guarded copies of a router's Starlette Route and Mount entries."""
+    """Copy routes in order, guarding Starlette Route and Mount entries."""
 
     guarded_routes: list[BaseRoute] = []
     for route in router.routes:
         if isinstance(route, (APIRoute, WebSocketRoute)):
+            guarded_routes.append(route)
             continue
 
         if isinstance(route, Route):
@@ -108,6 +109,8 @@ def guarded_router_overlay(router: APIRouter) -> APIRouter:
             guarded_app = GuardedASGIApp(route.app, routes=route.routes)
             guarded_routes.append(Mount(route.path, app=guarded_app, name=route.name))
             continue
+
+        guarded_routes.append(route)
 
     return APIRouter(routes=guarded_routes)
 

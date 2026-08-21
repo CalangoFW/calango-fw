@@ -78,7 +78,9 @@ class Calango(FastAPI):
     def include_router(self, router: APIRouter, **kwargs: Any) -> None:
         overlay = guarded_router_overlay(router)
         if overlay.routes:
-            super().include_router(overlay, **kwargs)
+            overlay_kwargs: dict[str, Any] = dict(kwargs)
+            overlay_kwargs["include_in_schema"] = False
+            super().include_router(overlay, **overlay_kwargs)
         super().include_router(router, **kwargs)
 
     def mount(  # ty: ignore[invalid-method-override]

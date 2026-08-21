@@ -178,6 +178,43 @@ def test_include_router_does_not_mutate_router_reused_by_plain_fastapi(
     )
 
 
+def test_include_router_preserves_api_route_precedence_over_later_starlette_route(
+    app: Calango,
+) -> None:
+    router = APIRouter()
+
+    @router.api_route("/collision", methods=["GET", "HEAD"])
+    async def api_route() -> JSONResponse:
+        return JSONResponse({"kind": "api"}, headers={"x-route-kind": "api"})
+
+    async def starlette_route(_request: Request) -> JSONResponse:
+        return JSONResponse({"kind": "starlette"}, headers={"x-route-kind": "starlette"})
+
+    router.add_route("/collision", starlette_route)
+    app.include_router(router)
+
+    assert TestClient(app).head("/collision").headers["x-route-kind"] == "api"
+
+
+def test_include_router_preserves_starlette_route_precedence_over_later_api_route(
+    app: Calango,
+) -> None:
+    router = APIRouter()
+
+    async def starlette_route(_request: Request) -> JSONResponse:
+        return JSONResponse({"kind": "starlette"}, headers={"x-route-kind": "starlette"})
+
+    router.add_route("/collision", starlette_route)
+
+    @router.api_route("/collision", methods=["GET", "HEAD"])
+    async def api_route() -> JSONResponse:
+        return JSONResponse({"kind": "api"}, headers={"x-route-kind": "api"})
+
+    app.include_router(router)
+
+    assert TestClient(app).head("/collision").headers["x-route-kind"] == "starlette"
+
+
 def test_request_guards_run_in_registration_order(app: Calango) -> None:
     calls = []
 
