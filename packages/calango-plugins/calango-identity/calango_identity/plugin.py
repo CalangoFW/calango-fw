@@ -42,9 +42,7 @@ class IdentityPlugin:
         settings: IdentitySettings | None = None,
         refresh_store: RefreshTokenStore | None = None,
     ) -> None:
-        # pydantic-settings populates PRIVATE_KEY/PUBLIC_KEY from env at runtime;
-        # ty has no pydantic plugin so it sees them as missing required args.
-        self._settings = settings or IdentitySettings()  # ty: ignore[missing-argument]
+        self._settings = settings or IdentitySettings()
         self._limiter = make_limiter(self._settings.REDIS_URL)
         self._owned_redis_client: redis.Redis | None = None
         if refresh_store is not None:

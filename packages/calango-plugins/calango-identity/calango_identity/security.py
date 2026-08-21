@@ -12,10 +12,10 @@ from calango_identity.settings import IdentitySettings
 
 def make_jwt_strategy(settings: IdentitySettings) -> JWTStrategy:
     return JWTStrategy(
-        secret=settings.PRIVATE_KEY,
+        secret=settings.PRIVATE_KEY.get_secret_value(),
         lifetime_seconds=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         algorithm="RS256",
-        public_key=settings.PUBLIC_KEY,
+        public_key=settings.PUBLIC_KEY.get_secret_value(),
     )
 
 

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from ipaddress import ip_address, ip_network
+from typing import Any
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey, RSAPublicKey
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,8 +20,8 @@ class IdentitySettings(BaseSettings):
         IDENTITY__REDIS_URL=redis://localhost:6379/0
     """
 
-    PRIVATE_KEY: str
-    PUBLIC_KEY: str
+    PRIVATE_KEY: SecretStr
+    PUBLIC_KEY: SecretStr
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=15, gt=0)
     REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7, gt=0)
     REFRESH_TOKEN_KEY_PREFIX: str = "calango:identity:refresh"  # noqa: S105 - Redis namespace
@@ -31,12 +32,32 @@ class IdentitySettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="IDENTITY__", hide_input_in_errors=True)
 
+    def __init__(self, **values: Any) -> None:
+        """Accept string-backed environment values while storing keys as secrets."""
+        super().__init__(**values)
+
+    @model_validator(mode="before")
+    @classmethod
+    def redact_key_inputs(cls, values: Any) -> Any:
+        """Wrap supplied key values before validation so structured errors redact them."""
+        if not isinstance(values, dict):
+            return values
+
+        redacted_values = values.copy()
+        for field in ("PRIVATE_KEY", "PUBLIC_KEY"):
+            value = values.get(field)
+            if isinstance(value, str):
+                redacted_values[field] = SecretStr(value)
+        return redacted_values
+
     @field_validator("PRIVATE_KEY")
     @classmethod
-    def validate_private_key(cls, value: str) -> str:
+    def validate_private_key(cls, value: SecretStr) -> SecretStr:
         """Require an unencrypted PEM-encoded RSA private key at startup."""
         try:
-            key = serialization.load_pem_private_key(value.encode(), password=None)
+            key = serialization.load_pem_private_key(
+                value.get_secret_value().encode(), password=None
+            )
         except (TypeError, ValueError) as error:
             raise ValueError("PRIVATE_KEY must be a valid unencrypted PEM private key") from error
         if not isinstance(key, RSAPrivateKey):
@@ -45,10 +66,10 @@ class IdentitySettings(BaseSettings):
 
     @field_validator("PUBLIC_KEY")
     @classmethod
-    def validate_public_key(cls, value: str) -> str:
+    def validate_public_key(cls, value: SecretStr) -> SecretStr:
         """Require a PEM-encoded RSA public key at startup."""
         try:
-            key = serialization.load_pem_public_key(value.encode())
+            key = serialization.load_pem_public_key(value.get_secret_value().encode())
         except ValueError as error:
             raise ValueError("PUBLIC_KEY must be a valid PEM public key") from error
         if not isinstance(key, RSAPublicKey):

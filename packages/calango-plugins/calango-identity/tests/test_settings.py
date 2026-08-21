@@ -17,13 +17,13 @@ def valid_keys() -> dict[str, str]:
 def test_settings_requires_private_key():
     """IdentitySettings raises ValidationError if PRIVATE_KEY is missing."""
     with pytest.raises(ValidationError):
-        IdentitySettings(PUBLIC_KEY="some-key")  # ty: ignore[missing-argument]  # intentional
+        IdentitySettings(PUBLIC_KEY="some-key")
 
 
 def test_settings_requires_public_key():
     """IdentitySettings raises ValidationError if PUBLIC_KEY is missing."""
     with pytest.raises(ValidationError):
-        IdentitySettings(PRIVATE_KEY="some-key")  # ty: ignore[missing-argument]  # intentional
+        IdentitySettings(PRIVATE_KEY="some-key")
 
 
 def test_settings_defaults(valid_keys):
@@ -68,28 +68,43 @@ def test_settings_rejects_blank_refresh_token_key_prefix(valid_keys):
         IdentitySettings(**valid_keys, REFRESH_TOKEN_KEY_PREFIX=" \t\n ")
 
 
-@pytest.mark.parametrize("field", ["PRIVATE_KEY", "PUBLIC_KEY"])
-def test_settings_rejects_invalid_pem_keys(field, valid_keys):
+@pytest.mark.parametrize(
+    ("field", "secret_marker"),
+    [
+        ("PRIVATE_KEY", "PRIVATE_KEY_SECRET_MARKER"),
+        ("PUBLIC_KEY", "PUBLIC_KEY_SECRET_MARKER"),
+    ],
+)
+def test_settings_rejects_invalid_pem_keys_without_exposing_inputs(
+    field, secret_marker, valid_keys
+):
     """Identity startup must reject a malformed signing or verification key."""
-    with pytest.raises(ValidationError):
-        IdentitySettings(**(valid_keys | {field: "not a PEM key"}))
-
-
-def test_settings_validation_errors_hide_key_input_values(valid_keys):
-    """Startup validation errors must not expose a configured PEM value."""
-    secret_marker = "PRIVATE_KEY_SECRET_MARKER"
-
     with pytest.raises(ValidationError) as error:
-        IdentitySettings(**(valid_keys | {"PRIVATE_KEY": secret_marker}))
+        IdentitySettings(**(valid_keys | {field: secret_marker}))
 
     assert secret_marker not in str(error.value)
+    assert secret_marker not in repr(error.value.errors())
+    assert secret_marker not in error.value.json()
+
+
+def test_settings_representation_and_dumps_redact_rsa_keys(valid_keys):
+    """Configured RSA keys must not leak through routine settings serialization."""
+    settings = IdentitySettings(**valid_keys)
+
+    secret_markers = (TEST_PRIVATE_KEY.splitlines()[1], TEST_PUBLIC_KEY.splitlines()[1])
+    for rendered in (
+        repr(settings),
+        repr(settings.model_dump()),
+        settings.model_dump_json(),
+    ):
+        assert all(marker not in rendered for marker in secret_markers)
 
 
 def test_settings_normalizes_trusted_proxies_to_tuple(valid_keys):
     """Trusted proxy configuration is immutable after settings startup."""
     settings = IdentitySettings(
         **valid_keys,
-        TRUSTED_PROXIES=["10.0.0.0/8", "192.0.2.10"],  # ty: ignore[invalid-argument-type]  # Pydantic coerces config sequences.
+        TRUSTED_PROXIES=["10.0.0.0/8", "192.0.2.10"],
     )
 
     assert settings.TRUSTED_PROXIES == ("10.0.0.0/8", "192.0.2.10")

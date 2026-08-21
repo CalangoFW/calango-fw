@@ -15,8 +15,8 @@ from calango_identity.settings import IdentitySettings
 class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     def __init__(self, user_db: SQLAlchemyUserDatabase, settings: IdentitySettings) -> None:
         super().__init__(user_db)
-        self.reset_password_token_secret = settings.PRIVATE_KEY
-        self.verification_token_secret = settings.PRIVATE_KEY
+        self.reset_password_token_secret = settings.PRIVATE_KEY.get_secret_value()
+        self.verification_token_secret = settings.PRIVATE_KEY.get_secret_value()
 
     async def on_after_register(self, user: User, request: Request | None = None) -> None:
         pass  # Hook: send welcome email, etc.
