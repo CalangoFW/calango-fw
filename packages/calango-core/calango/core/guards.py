@@ -4,7 +4,7 @@ from collections.abc import Awaitable, Callable
 from functools import update_wrapper
 from typing import Any
 
-from fastapi.routing import APIRoute
+from fastapi.routing import APIRoute, APIRouter
 from starlette.requests import HTTPConnection, Request
 from starlette.routing import BaseRoute, Match, Mount, Route, WebSocketRoute
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -83,29 +83,33 @@ class GuardedASGIApp:
         await self.app(scope, replayable_receive, send)
 
 
-def guard_included_router_routes(routes: list[BaseRoute]) -> None:
-    """Guard Starlette Route and Mount entries in an included APIRouter."""
+def guarded_router_overlay(router: APIRouter) -> APIRouter:
+    """Build guarded copies of a router's Starlette Route and Mount entries."""
 
-    for index, route in enumerate(routes):
+    guarded_routes: list[BaseRoute] = []
+    for route in router.routes:
         if isinstance(route, (APIRoute, WebSocketRoute)):
             continue
 
         if isinstance(route, Route):
-            if isinstance(route.endpoint, GuardedASGIApp):
-                continue
             endpoint = GuardedASGIApp(route.app, endpoint=route.endpoint)
-            routes[index] = Route(
-                route.path,
-                endpoint=endpoint,
-                methods=route.methods,
-                name=route.name,
-                include_in_schema=route.include_in_schema,
+            guarded_routes.append(
+                Route(
+                    route.path,
+                    endpoint=endpoint,
+                    methods=route.methods,
+                    name=route.name,
+                    include_in_schema=route.include_in_schema,
+                )
             )
             continue
 
-        if isinstance(route, Mount) and not isinstance(route.app, GuardedASGIApp):
+        if isinstance(route, Mount):
             guarded_app = GuardedASGIApp(route.app, routes=route.routes)
-            routes[index] = Mount(route.path, app=guarded_app, name=route.name)
+            guarded_routes.append(Mount(route.path, app=guarded_app, name=route.name))
+            continue
+
+    return APIRouter(routes=guarded_routes)
 
 
 class RequestGuardMiddleware:

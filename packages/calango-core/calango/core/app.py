@@ -12,7 +12,7 @@ from calango.core.database import DatabaseRuntime
 from calango.core.guards import (
     RequestGuard,
     RequestGuardMiddleware,
-    guard_included_router_routes,
+    guarded_router_overlay,
     request_guard_dependency,
 )
 from calango.core.handlers import calango_exception_handler, unhandled_exception_handler
@@ -76,7 +76,9 @@ class Calango(FastAPI):
         self._request_guards = (*self._request_guards, guard)
 
     def include_router(self, router: APIRouter, **kwargs: Any) -> None:
-        guard_included_router_routes(router.routes)
+        overlay = guarded_router_overlay(router)
+        if overlay.routes:
+            super().include_router(overlay, **kwargs)
         super().include_router(router, **kwargs)
 
     def mount(  # ty: ignore[invalid-method-override]

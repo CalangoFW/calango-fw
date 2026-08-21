@@ -137,6 +137,47 @@ def test_guard_covers_private_mount_included_from_an_api_router(
     assert selected_endpoints[0] is not None
 
 
+def test_include_router_does_not_mutate_router_reused_by_plain_fastapi(
+    app: Calango,
+) -> None:
+    router = APIRouter()
+    child = FastAPI()
+
+    @router.get("/api-route")
+    async def api_route() -> dict[str, str]:
+        return {"kind": "api"}
+
+    async def starlette_route(_request: Request) -> JSONResponse:
+        return JSONResponse({"kind": "starlette"})
+
+    @child.get("/")
+    async def mounted_route() -> dict[str, str]:
+        return {"kind": "mount"}
+
+    router.add_route("/starlette-route", starlette_route)
+    router.mount("/mounted", child)
+    original_routes = tuple(router.routes)
+
+    async def allow(_request: Request) -> None:
+        pass
+
+    app.add_request_guard(allow)
+    app.include_router(router)
+
+    plain_app = FastAPI()
+    plain_app.include_router(router)
+    plain_client = TestClient(plain_app, raise_server_exceptions=False)
+
+    assert plain_client.get("/api-route").status_code == 200
+    assert plain_client.get("/starlette-route").status_code == 200
+    assert plain_client.get("/mounted/").status_code == 200
+    assert len(router.routes) == len(original_routes)
+    assert all(
+        current is original
+        for current, original in zip(router.routes, original_routes, strict=True)
+    )
+
+
 def test_request_guards_run_in_registration_order(app: Calango) -> None:
     calls = []
 
