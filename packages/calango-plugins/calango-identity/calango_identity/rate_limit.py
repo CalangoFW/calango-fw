@@ -19,7 +19,7 @@ def _is_trusted_proxy(address: IPAddress, trusted_proxies: tuple[str, ...]) -> b
                 return True
         except ValueError:
             try:
-                if address in ip_network(proxy, strict=False):
+                if address in ip_network(proxy, strict=True):
                     return True
             except ValueError:
                 continue

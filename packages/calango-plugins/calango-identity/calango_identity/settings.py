@@ -29,7 +29,7 @@ class IdentitySettings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     TRUSTED_PROXIES: tuple[str, ...] = ()
 
-    model_config = SettingsConfigDict(env_prefix="IDENTITY__")
+    model_config = SettingsConfigDict(env_prefix="IDENTITY__", hide_input_in_errors=True)
 
     @field_validator("PRIVATE_KEY")
     @classmethod
@@ -72,7 +72,7 @@ class IdentitySettings(BaseSettings):
                 ip_address(value)
             except ValueError:
                 try:
-                    ip_network(value, strict=False)
+                    ip_network(value, strict=True)
                 except ValueError as error:
                     raise ValueError(
                         "TRUSTED_PROXIES entries must be IP addresses or networks"

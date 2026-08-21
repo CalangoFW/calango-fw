@@ -75,6 +75,16 @@ def test_settings_rejects_invalid_pem_keys(field, valid_keys):
         IdentitySettings(**(valid_keys | {field: "not a PEM key"}))
 
 
+def test_settings_validation_errors_hide_key_input_values(valid_keys):
+    """Startup validation errors must not expose a configured PEM value."""
+    secret_marker = "PRIVATE_KEY_SECRET_MARKER"
+
+    with pytest.raises(ValidationError) as error:
+        IdentitySettings(**(valid_keys | {"PRIVATE_KEY": secret_marker}))
+
+    assert secret_marker not in str(error.value)
+
+
 def test_settings_normalizes_trusted_proxies_to_tuple(valid_keys):
     """Trusted proxy configuration is immutable after settings startup."""
     settings = IdentitySettings(
@@ -83,3 +93,9 @@ def test_settings_normalizes_trusted_proxies_to_tuple(valid_keys):
     )
 
     assert settings.TRUSTED_PROXIES == ("10.0.0.0/8", "192.0.2.10")
+
+
+def test_settings_rejects_trusted_proxy_cidr_with_host_bits(valid_keys):
+    """A typo in a proxy CIDR must not silently broaden the trusted network."""
+    with pytest.raises(ValidationError):
+        IdentitySettings(**valid_keys, TRUSTED_PROXIES=("10.42.7.9/8",))

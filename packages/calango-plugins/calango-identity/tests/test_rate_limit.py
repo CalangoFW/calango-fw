@@ -59,6 +59,13 @@ def test_malformed_forwarded_for_falls_back_to_trusted_peer():
     assert resolve_client_ip(request, ("192.0.2.10",)) == "192.0.2.10"
 
 
+def test_proxy_cidr_with_host_bits_does_not_trust_forwarded_for():
+    """Noncanonical CIDRs are rejected instead of expanding a trusted range."""
+    request = _request("10.0.0.2", "203.0.113.4")
+
+    assert resolve_client_ip(request, ("10.42.7.9/8",)) == "10.0.0.2"
+
+
 def test_get_email_key_returns_email_from_state():
     """get_email_key returns login_email from request.state when present."""
     # Simulate a request with login_email set on state
