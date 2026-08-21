@@ -1,7 +1,8 @@
+from contextlib import asynccontextmanager
 from typing import ClassVar
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from calango.config import CalangoSettings, SecuritySettings
@@ -36,6 +37,67 @@ class TestCalangoFactory:
     def test_cria_com_settings_default(self):
         app = Calango(settings=CalangoSettings(security=SecuritySettings(SECRET_KEY="k")))
         assert isinstance(app, FastAPI)
+
+    def test_framework_and_user_lifespan_order(self, settings):
+        events = []
+
+        @asynccontextmanager
+        async def lifespan(app):
+            assert app.database.started
+            events.append("user-start")
+            yield
+            events.append("user-stop")
+            assert app.database.started
+
+        app = Calango(settings=settings, lifespan=lifespan)
+
+        with TestClient(app):
+            assert app.database.started
+            events.append("request")
+
+        assert events == ["user-start", "request", "user-stop"]
+        assert not app.database.started
+
+    def test_framework_closes_database_after_user_startup_exception(self, settings):
+        @asynccontextmanager
+        async def lifespan(app):
+            assert app.database.started
+            raise RuntimeError("user startup failed")
+            yield
+
+        app = Calango(settings=settings, lifespan=lifespan)
+
+        with pytest.raises(RuntimeError, match="user startup failed"):
+            with TestClient(app):
+                pass
+
+        assert not app.database.started
+
+    def test_user_lifespan_state_is_preserved(self, settings):
+        @asynccontextmanager
+        async def lifespan(app):
+            yield {"from_user_lifespan": "available"}
+
+        app = Calango(settings=settings, lifespan=lifespan)
+
+        @app.get("/lifespan-state")
+        def lifespan_state(request: Request):
+            return {"value": request.state.from_user_lifespan}
+
+        with TestClient(app) as client:
+            response = client.get("/lifespan-state")
+
+        assert response.json() == {"value": "available"}
+
+    def test_default_lifespan_keeps_event_handlers(self, settings):
+        events = []
+        app = Calango(settings=settings, on_startup=[lambda: events.append("startup")])
+        app.router.add_event_handler("shutdown", lambda: events.append("shutdown"))
+
+        with TestClient(app):
+            assert events == ["startup"]
+
+        assert events == ["startup", "shutdown"]
 
 
 class TestCalangoMiddleware:

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any
 
 from calango_plugin_base import PluginBase
 from fastapi import FastAPI
 
 from calango.config import CalangoSettings, SecuritySettings
+from calango.core.database import DatabaseRuntime
 from calango.core.handlers import calango_exception_handler, unhandled_exception_handler
 from calango.core.middleware import CalangoMiddleware
 from calango.exceptions import CalangoException
@@ -22,6 +24,20 @@ class Calango(FastAPI):
         super().__init__(**kwargs)
 
         self.settings = settings
+        self.database = DatabaseRuntime(settings)
+
+        application_lifespan = self.router.lifespan_context
+
+        @asynccontextmanager
+        async def lifespan(app: Calango):
+            await app.database.start()
+            try:
+                async with application_lifespan(app) as state:
+                    yield state
+            finally:
+                await app.database.close()
+
+        self.router.lifespan_context = lifespan
 
         self.add_middleware(CalangoMiddleware)
 
