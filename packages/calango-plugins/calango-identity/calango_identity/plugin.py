@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from importlib import import_module
 from importlib.resources import files
 from typing import ClassVar
 
@@ -96,6 +97,10 @@ class IdentityPlugin:
         """Close only the async Redis client constructed by this plugin."""
         if self._owned_redis_client is not None:
             await self._owned_redis_client.aclose()
+
+    def import_models(self) -> None:
+        """Register Identity models explicitly with canonical metadata."""
+        import_module("calango_identity.models")
 
     def migrations(self) -> tuple[PluginMigration, ...]:
         """Return the wheel-safe location for identity revisions."""

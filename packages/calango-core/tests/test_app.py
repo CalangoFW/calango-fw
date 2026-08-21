@@ -307,6 +307,8 @@ def test_include_plugin_calls_register():
         def register(self, app) -> None:
             FakePlugin.registered_with = app
 
+        def import_models(self) -> None: ...
+
         def migrations(self) -> tuple[PluginMigration, ...]:
             return ()
 
@@ -342,6 +344,8 @@ def test_include_plugin_accepts_valid_plugin():
         requires: ClassVar[list[str]] = []
 
         def register(self, app) -> None: ...
+
+        def import_models(self) -> None: ...
 
         def migrations(self) -> tuple[PluginMigration, ...]:
             return ()

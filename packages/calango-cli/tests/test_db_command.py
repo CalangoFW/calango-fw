@@ -1,11 +1,14 @@
 import os
 from pathlib import Path
 from types import ModuleType
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 from zipfile import Path as ZipPath
 from zipfile import ZipFile
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from calango_plugin_base import PluginMigration
 from typer.testing import CliRunner
 
@@ -29,22 +32,127 @@ def test_db_help_exits_0():
     assert runner.invoke(app, ["db", "--help"]).exit_code == 0
 
 
-def test_db_migrate_runs_upgrade_head(tmp_path):
+def test_db_migrate_runs_upgrade_all_heads(tmp_path):
     _project(tmp_path)
     with patch("calango_cli.commands.db.subprocess.run") as run:
         run.return_value = MagicMock(returncode=0)
         result = runner.invoke(app, ["db", "migrate", "--path", str(tmp_path)])
     assert result.exit_code == 0
     argv = run.call_args.args[0]
-    assert argv[-2:] == ["upgrade", "head"]
+    assert argv[-2:] == ["upgrade", "heads"]
 
 
-def test_db_rollback_default_one_step(tmp_path):
+def test_db_rollback_default_one_step_on_every_current_head(tmp_path):
     _project(tmp_path)
     with patch("calango_cli.commands.db.subprocess.run") as run:
-        run.return_value = MagicMock(returncode=0)
-        runner.invoke(app, ["db", "rollback", "--path", str(tmp_path)])
-    assert run.call_args.args[0][-2:] == ["downgrade", "-1"]
+        run.side_effect = (
+            MagicMock(
+                returncode=0,
+                stdout="Rev: z_head (head) (current)\nRev: a_head (head) (current)\n",
+            ),
+            MagicMock(returncode=0),
+            MagicMock(returncode=0),
+        )
+        result = runner.invoke(app, ["db", "rollback", "--path", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert [call.args[0][-2:] for call in run.call_args_list] == [
+        ["current", "--verbose"],
+        ["downgrade", "a_head@-1"],
+        ["downgrade", "z_head@-1"],
+    ]
+
+
+def test_db_rollback_applies_step_to_every_current_head(tmp_path):
+    _project(tmp_path)
+    with patch("calango_cli.commands.db.subprocess.run") as run:
+        run.side_effect = (
+            MagicMock(
+                returncode=0,
+                stdout=("Rev: orders_0002 (head) (current)\nRev: identity_0001 (head) (current)\n"),
+            ),
+            MagicMock(returncode=0),
+            MagicMock(returncode=0),
+            MagicMock(
+                returncode=0,
+                stdout=("Rev: orders_0001 (head) (current)\nRev: identity_base (head) (current)\n"),
+            ),
+            MagicMock(returncode=0),
+            MagicMock(returncode=0),
+        )
+        result = runner.invoke(
+            app,
+            ["db", "rollback", "--step", "2", "--path", str(tmp_path)],
+        )
+
+    assert result.exit_code == 0
+    assert [call.args[0][-2:] for call in run.call_args_list] == [
+        ["current", "--verbose"],
+        ["downgrade", "identity_0001@-1"],
+        ["downgrade", "orders_0002@-1"],
+        ["current", "--verbose"],
+        ["downgrade", "identity_base@-1"],
+        ["downgrade", "orders_0001@-1"],
+    ]
+
+
+def test_db_rollback_rejects_non_positive_step_without_running_alembic(tmp_path):
+    _project(tmp_path)
+    with patch("calango_cli.commands.db.subprocess.run") as run:
+        result = runner.invoke(
+            app,
+            ["db", "rollback", "--step", "0", "--path", str(tmp_path)],
+        )
+
+    assert result.exit_code != 0
+    run.assert_not_called()
+
+
+def test_db_rollback_uses_explicit_parent_for_merge_revision(tmp_path):
+    _project(tmp_path)
+    current = (
+        "Current revision(s) for postgresql://localhost/db:\n"
+        "Rev: merge_head (head) (mergepoint) (current)\n"
+        "Merges: z_parent, a_parent\n"
+        "Path: /tmp/merge.py\n"
+    )
+    with patch("calango_cli.commands.db.subprocess.run") as run:
+        run.side_effect = (
+            MagicMock(returncode=0, stdout=current),
+            MagicMock(returncode=0),
+        )
+        result = runner.invoke(app, ["db", "rollback", "--path", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert [call.args[0][-2:] for call in run.call_args_list] == [
+        ["current", "--verbose"],
+        ["downgrade", "merge_head@a_parent"],
+    ]
+
+
+def test_db_rollback_rechecks_graph_before_crossing_merge(tmp_path):
+    _project(tmp_path)
+    child = "Rev: child (head) (current)\nParent: merge_head\n"
+    merge = "Rev: merge_head (head) (mergepoint) (current)\nMerges: z_parent, a_parent\n"
+    with patch("calango_cli.commands.db.subprocess.run") as run:
+        run.side_effect = (
+            MagicMock(returncode=0, stdout=child),
+            MagicMock(returncode=0),
+            MagicMock(returncode=0, stdout=merge),
+            MagicMock(returncode=0),
+        )
+        result = runner.invoke(
+            app,
+            ["db", "rollback", "--step", "2", "--path", str(tmp_path)],
+        )
+
+    assert result.exit_code == 0
+    assert [call.args[0][-2:] for call in run.call_args_list] == [
+        ["current", "--verbose"],
+        ["downgrade", "child@-1"],
+        ["current", "--verbose"],
+        ["downgrade", "merge_head@a_parent"],
+    ]
 
 
 def test_db_revision_passes_message(tmp_path):
@@ -138,12 +246,18 @@ def test_version_locations_preserves_topological_order(tmp_path):
     orders = tmp_path / "orders"
     accounts.mkdir()
     orders.mkdir()
+    (accounts / "0001_accounts.py").write_text("revision = 'accounts_0001'\ndown_revision = None\n")
+    (orders / "0001_orders.py").write_text("revision = 'orders_0001'\ndown_revision = None\n")
     items = (
         PluginMigration("orders", orders, ("accounts",)),
         PluginMigration("accounts", accounts, ()),
     )
 
-    assert version_locations(items) == (accounts, orders)
+    locations = version_locations(items)
+
+    assert locations[0] == accounts
+    assert locations[1].name == orders.name
+    assert locations[1] != orders
 
 
 def test_version_locations_rejects_missing_plugin_directory(tmp_path):
@@ -166,29 +280,84 @@ def test_version_locations_materializes_non_filesystem_traversable(tmp_path):
     assert location.joinpath("0001_plugin.py").read_text() == "revision = 'plugin_0001'\n"
 
 
+def test_version_locations_adds_effective_alembic_dependency_edges(tmp_path):
+    base_versions = tmp_path / "base_versions"
+    dependent_versions = tmp_path / "dependent_versions"
+    base_versions.mkdir()
+    dependent_versions.mkdir()
+    (base_versions / "0001_base.py").write_text(
+        "revision = 'base_0001'\ndown_revision = None\nbranch_labels = None\ndepends_on = None\n"
+    )
+    (dependent_versions / "0001_dependent.py").write_text(
+        "revision = 'dependent_0001'\n"
+        "down_revision = None\n"
+        "branch_labels = None\n"
+        "depends_on = None\n"
+    )
+    items = (
+        PluginMigration("dependent", dependent_versions, ("base",)),
+        PluginMigration("base", base_versions, ()),
+    )
+
+    locations = tuple(reversed(version_locations(items)))
+    script_root = tmp_path / "alembic"
+    script_root.mkdir()
+    config = Config()
+    config.set_main_option("script_location", str(script_root))
+    config.set_main_option("version_locations", os.pathsep.join(map(str, locations)))
+    config.set_main_option("path_separator", "os")
+    scripts = ScriptDirectory.from_config(config)
+
+    assert scripts.get_revision("dependent_0001").down_revision == "base_0001"
+
+
 def test_generated_alembic_env_loads_plugins_before_metadata(monkeypatch, tmp_path):
+    import calango_cli.migrations as migrations_module
+
     result = runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
     assert result.exit_code == 0
     env_path = tmp_path / "my-api" / "alembic" / "env.py"
     events: list[str] = []
 
     class FakePlugin:
+        name = "identity"
+        version = "1.0.0"
+        requires: ClassVar[list[str]] = []
+
+        def register(self, app): ...
+
+        def import_models(self):
+            events.append("plugin-models")
+
         def migrations(self):
             events.append("migrations")
             versions = tmp_path / "identity-versions"
             versions.mkdir()
             return (PluginMigration("identity", versions, ()),)
 
+        def settings(self): ...
+
+        def test_fixtures(self):
+            return []
+
+        def context_md(self):
+            return ""
+
     class FakeEntryPoint:
         name = "identity"
 
         def load(self):
-            events.append("plugin-models")
+            events.append("entry-point")
             return FakePlugin
 
     monkeypatch.setattr(
         "importlib.metadata.entry_points",
         lambda **kwargs: (FakeEntryPoint(),),
+    )
+    monkeypatch.setattr(
+        migrations_module,
+        "refresh_alembic_script",
+        lambda config, script: events.append("script-graph"),
     )
 
     class FakeConfig:
@@ -220,6 +389,7 @@ def test_generated_alembic_env_loads_plugins_before_metadata(monkeypatch, tmp_pa
         begin_transaction=Transaction,
         run_migrations=lambda: None,
         is_offline_mode=lambda: True,
+        script=object(),
     )
     alembic = ModuleType("alembic")
     vars(alembic)["context"] = context
@@ -256,10 +426,12 @@ def test_generated_alembic_env_loads_plugins_before_metadata(monkeypatch, tmp_pa
 
     assert events == [
         "config:sqlalchemy.url:postgresql+asyncpg://unused",
+        "entry-point",
         "plugin-models",
         "migrations",
         "config:version_locations:"
         + os.pathsep.join(("alembic/versions", str(tmp_path / "identity-versions"))),
+        "script-graph",
         "models:app.contexts",
         "metadata",
     ]

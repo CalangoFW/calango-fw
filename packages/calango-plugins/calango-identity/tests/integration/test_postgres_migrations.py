@@ -14,6 +14,7 @@ import pytest
 from calango_identity.plugin import IdentityPlugin
 from calango_identity.refresh_tokens import InMemoryRefreshTokenStore
 from calango_identity.settings import IdentitySettings
+from calango_plugin_base import PluginMigration
 from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import create_async_engine
 from tests.conftest import TEST_PRIVATE_KEY, TEST_PUBLIC_KEY
@@ -124,13 +125,19 @@ async def _table_names(url: str) -> set[str]:
         await engine.dispose()
 
 
-def _run_alembic(url: str, command_name: str, revision: str, versions: Path) -> None:
+def _run_alembic(
+    url: str,
+    command_name: str,
+    revision: str,
+    versions: Path | tuple[Path, ...],
+) -> None:
     from alembic import command
     from alembic.config import Config
 
     config = Config()
     config.set_main_option("script_location", str(Path(__file__).parents[1] / "alembic"))
-    config.set_main_option("version_locations", str(versions))
+    locations = (versions,) if isinstance(versions, Path) else versions
+    config.set_main_option("version_locations", os.pathsep.join(map(str, locations)))
     config.set_main_option("path_separator", "os")
     config.set_main_option("sqlalchemy.url", url)
     getattr(command, command_name)(config, revision)
@@ -148,3 +155,143 @@ async def test_identity_upgrade_and_downgrade(postgres_url):
 
     await asyncio.to_thread(_run_alembic, postgres_url, "downgrade", "base", versions)
     assert not (await _table_names(postgres_url) & IDENTITY_TABLES)
+
+
+async def test_plugin_dependency_executes_after_required_plugin(postgres_url, tmp_path):
+    base_versions = tmp_path / "base_versions"
+    dependent_versions = tmp_path / "dependent_versions"
+    independent_versions = tmp_path / "independent_versions"
+    required_versions = tmp_path / "required_versions"
+    base_versions.mkdir()
+    dependent_versions.mkdir()
+    independent_versions.mkdir()
+    required_versions.mkdir()
+    (base_versions / "0001_base.py").write_text(
+        "from alembic import op\n"
+        "import sqlalchemy as sa\n"
+        "revision = 'zzz_base_0001'\n"
+        "down_revision = None\n"
+        "branch_labels = None\n"
+        "depends_on = None\n"
+        "def upgrade():\n"
+        "    op.create_table('plugin_migration_order', "
+        "sa.Column('id', sa.Integer(), primary_key=True), "
+        "sa.Column('label', sa.String(32), nullable=False))\n"
+        '    op.execute("INSERT INTO plugin_migration_order (id, label) '
+        "VALUES (1, 'base')\")\n"
+        "def downgrade():\n"
+        "    op.drop_table('plugin_migration_order')\n"
+    )
+    (dependent_versions / "0001_dependent.py").write_text(
+        "from alembic import op\n"
+        "revision = 'aaa_dependent_0001'\n"
+        "down_revision = None\n"
+        "branch_labels = None\n"
+        "depends_on = None\n"
+        "def upgrade():\n"
+        '    op.execute("INSERT INTO plugin_migration_order (id, label) '
+        "VALUES (2, 'dependent')\")\n"
+        "def downgrade():\n"
+        '    op.execute("DELETE FROM plugin_migration_order WHERE id = 2")\n'
+    )
+    (dependent_versions / "0002_dependent_child.py").write_text(
+        "from alembic import op\n"
+        "revision = 'dependent_0002'\n"
+        "down_revision = 'aaa_dependent_0001'\n"
+        "branch_labels = None\n"
+        "depends_on = None\n"
+        "def upgrade():\n"
+        '    op.execute("INSERT INTO plugin_migration_order (id, label) '
+        "VALUES (3, 'child')\")\n"
+        "def downgrade():\n"
+        '    op.execute("DELETE FROM plugin_migration_order WHERE id = 3")\n'
+    )
+    (independent_versions / "0001_independent.py").write_text(
+        "from alembic import op\n"
+        "import sqlalchemy as sa\n"
+        "revision = 'independent_0001'\n"
+        "down_revision = None\n"
+        "branch_labels = None\n"
+        "depends_on = None\n"
+        "def upgrade():\n"
+        "    op.create_table('independent_marker', "
+        "sa.Column('id', sa.Integer(), primary_key=True))\n"
+        "def downgrade():\n"
+        "    op.drop_table('independent_marker')\n"
+    )
+    (required_versions / "0001_required.py").write_text(
+        "from alembic import op\n"
+        "import sqlalchemy as sa\n"
+        "revision = 'required_0001'\n"
+        "down_revision = None\n"
+        "branch_labels = None\n"
+        "depends_on = None\n"
+        "def upgrade():\n"
+        "    op.create_table('required_marker', "
+        "sa.Column('id', sa.Integer(), primary_key=True))\n"
+        "def downgrade():\n"
+        "    op.drop_table('required_marker')\n"
+    )
+    items = (
+        PluginMigration("dependent", dependent_versions, ("base", "required")),
+        PluginMigration("independent", independent_versions, ()),
+        PluginMigration("required", required_versions, ()),
+        PluginMigration("base", base_versions, ()),
+    )
+    locations = version_locations(items)
+
+    await asyncio.to_thread(_run_alembic, postgres_url, "upgrade", "heads", locations)
+    engine = create_async_engine(postgres_url)
+    try:
+        async with engine.connect() as connection:
+            labels = tuple(
+                await connection.run_sync(
+                    lambda sync: sync.exec_driver_sql(
+                        "SELECT label FROM plugin_migration_order ORDER BY id"
+                    ).scalars()
+                )
+            )
+    finally:
+        await engine.dispose()
+
+    assert labels == ("base", "dependent", "child")
+    assert "independent_marker" in await _table_names(postgres_url)
+
+    await asyncio.to_thread(
+        _run_alembic,
+        postgres_url,
+        "downgrade",
+        "dependent_0002@-1",
+        locations,
+    )
+    await asyncio.to_thread(
+        _run_alembic,
+        postgres_url,
+        "downgrade",
+        "aaa_dependent_0001@required_0001",
+        locations,
+    )
+    await asyncio.to_thread(
+        _run_alembic,
+        postgres_url,
+        "downgrade",
+        "independent_0001@-1",
+        locations,
+    )
+    assert "independent_marker" not in await _table_names(postgres_url)
+    assert "required_marker" in await _table_names(postgres_url)
+    engine = create_async_engine(postgres_url)
+    try:
+        async with engine.connect() as connection:
+            labels = tuple(
+                await connection.run_sync(
+                    lambda sync: sync.exec_driver_sql(
+                        "SELECT label FROM plugin_migration_order ORDER BY id"
+                    ).scalars()
+                )
+            )
+    finally:
+        await engine.dispose()
+    assert labels == ("base",)
+
+    await asyncio.to_thread(_run_alembic, postgres_url, "downgrade", "base", locations)

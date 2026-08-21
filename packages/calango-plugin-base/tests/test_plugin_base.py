@@ -15,6 +15,7 @@ class ValidPlugin:
     requires: ClassVar[list[str]] = []
 
     def register(self, app: FastAPI) -> None: ...
+    def import_models(self) -> None: ...
     def migrations(self) -> tuple[PluginMigration, ...]:
         return ()
 
@@ -32,11 +33,11 @@ class MissingMethodPlugin:
     name: ClassVar[str] = "bad"
     version: ClassVar[str] = "1.0.0"
     requires: ClassVar[list[str]] = []
-    # missing all 5 methods
+    # missing all 6 methods
 
 
 def test_valid_plugin_satisfies_protocol():
-    """A class implementing all 5 methods passes isinstance check."""
+    """A class implementing the complete contract passes isinstance check."""
     plugin = ValidPlugin()
     assert isinstance(plugin, PluginBase)
 
@@ -45,6 +46,28 @@ def test_missing_method_fails_isinstance():
     """A class missing protocol methods fails isinstance check."""
     plugin = MissingMethodPlugin()
     assert not isinstance(plugin, PluginBase)
+
+
+def test_plugin_without_explicit_model_import_fails_protocol():
+    class MissingModelImportPlugin:
+        name: ClassVar[str] = "missing-model-import"
+        version: ClassVar[str] = "1.0.0"
+        requires: ClassVar[list[str]] = []
+
+        def register(self, app: FastAPI) -> None: ...
+        def migrations(self) -> tuple[PluginMigration, ...]:
+            return ()
+
+        def settings(self) -> type[BaseSettings]:
+            return BaseSettings
+
+        def test_fixtures(self) -> list:
+            return []
+
+        def context_md(self) -> str:
+            return ""
+
+    assert not isinstance(MissingModelImportPlugin(), PluginBase)
 
 
 def test_plugin_base_is_runtime_checkable():

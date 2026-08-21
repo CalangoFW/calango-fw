@@ -34,6 +34,32 @@ def _alembic(project: Path, *args: str) -> int:
     ).returncode
 
 
+def _current_revisions(project: Path) -> tuple[int, tuple[tuple[str, tuple[str, ...]], ...]]:
+    uv = shutil.which("uv")
+    if uv is None:
+        print_error("uv not found.", hint="Install uv: https://docs.astral.sh/uv/")
+        raise typer.Exit(1)
+    result = subprocess.run(  # noqa: S603 — resolved path, fixed args
+        [uv, "run", "alembic", "current", "--verbose"],
+        cwd=project,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return result.returncode, ()
+    revisions: list[tuple[str, tuple[str, ...]]] = []
+    for line in result.stdout.splitlines():
+        if line.startswith("Rev: "):
+            revisions.append((line.removeprefix("Rev: ").split()[0], ()))
+        elif line.startswith("Merges: ") and revisions:
+            parents = tuple(
+                sorted(part.strip() for part in line.removeprefix("Merges: ").split(","))
+            )
+            revision, _ = revisions[-1]
+            revisions[-1] = (revision, parents)
+    return 0, tuple(sorted(revisions))
+
+
 @db_app.command("revision")
 def revision(
     message: str = typer.Option(..., "-m", "--message", help="Migration message"),
@@ -50,9 +76,9 @@ def revision(
 
 @db_app.command("migrate")
 def migrate(path: Path = typer.Option(Path("."), "--path", help="Project root")) -> None:
-    """Apply all pending migrations (alembic upgrade head)."""
+    """Apply all pending migrations across every Alembic head."""
     project = _require_project(path)
-    code = _alembic(project, "upgrade", "head")
+    code = _alembic(project, "upgrade", "heads")
     if code == 0:
         print_success("Database is up to date.")
     raise typer.Exit(code)
@@ -60,12 +86,33 @@ def migrate(path: Path = typer.Option(Path("."), "--path", help="Project root"))
 
 @db_app.command("rollback")
 def rollback(
-    step: int = typer.Option(1, "--step", help="How many migrations to revert"),
+    step: int = typer.Option(
+        1,
+        "--step",
+        min=1,
+        help="How many migrations to revert on every current branch",
+    ),
     path: Path = typer.Option(Path("."), "--path", help="Project root"),
 ) -> None:
-    """Revert the last N migrations (default 1)."""
+    """Revert the last N migrations on every current Alembic branch."""
     project = _require_project(path)
-    code = _alembic(project, "downgrade", f"-{step}")
+    remaining = step
+    code = 0
+    while code == 0 and remaining:
+        code, revisions = _current_revisions(project)
+        if code != 0:
+            break
+        if not revisions:
+            print_error("No migrations remain to roll back.")
+            code = 1
+            break
+
+        for revision, parents in revisions:
+            target = f"{revision}@{parents[0]}" if len(parents) > 1 else f"{revision}@-1"
+            code = _alembic(project, "downgrade", target)
+            if code != 0:
+                break
+        remaining -= 1
     if code == 0:
         print_success(f"Rolled back {step} migration(s).")
     raise typer.Exit(code)

@@ -236,6 +236,14 @@ def test_new_creates_pyproject_toml(tmp_path):
     assert (tmp_path / "my-api" / "pyproject.toml").is_file()
 
 
+def test_new_pyproject_installs_cli_runtime_used_by_alembic_env(tmp_path):
+    runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+
+    content = (tmp_path / "my-api" / "pyproject.toml").read_text()
+
+    assert '"calango-cli>=0.1.0"' in content
+
+
 def test_new_pyproject_has_calango_dependency(tmp_path):
     """pyproject.toml lists calango-core as a dependency."""
     runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])

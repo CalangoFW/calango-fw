@@ -30,9 +30,9 @@ calango generate agent Support
 ### Database
 
 ```bash
-calango db migrate          # uv run alembic upgrade head
+calango db migrate          # uv run alembic upgrade heads
 calango db seed             # runs app/seeds/ in order
-calango db rollback         # uv run alembic downgrade -1
+calango db rollback         # one revision on every current branch
 calango db suggest-indexes  # analyzes query history, generates migration
 ```
 

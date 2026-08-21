@@ -30,6 +30,9 @@ class PluginBase(Protocol):
             def register(self, app: FastAPI) -> None:
                 app.include_router(my_router)
 
+            def import_models(self) -> None:
+                import my_plugin.models
+
             def migrations(self) -> tuple[PluginMigration, ...]:
                 return ()
 
@@ -49,6 +52,10 @@ class PluginBase(Protocol):
 
     def register(self, app: FastAPI) -> None:
         """Register routers, middleware, exception handlers, lifecycle hooks."""
+        ...
+
+    def import_models(self) -> None:
+        """Import every plugin model into the canonical Base.metadata."""
         ...
 
     def migrations(self) -> tuple[PluginMigration, ...]:

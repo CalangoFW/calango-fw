@@ -167,7 +167,7 @@ class Calango(FastAPI):
         if not isinstance(plugin, PluginBase):
             raise TypeError(
                 f"{type(plugin).__name__} does not implement PluginBase. "
-                "All 5 methods (register, migrations, settings, "
+                "All 6 methods (register, import_models, migrations, settings, "
                 "test_fixtures, context_md) must be defined."
             )
         plugin.register(self)
