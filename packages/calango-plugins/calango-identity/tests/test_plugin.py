@@ -4,7 +4,7 @@ import pytest
 from calango_identity.plugin import IdentityPlugin
 from calango_identity.refresh_tokens import InMemoryRefreshTokenStore, RedisRefreshTokenStore
 from calango_identity.settings import IdentitySettings
-from calango_plugin_base import PluginBase
+from calango_plugin_base import PluginBase, PluginMigration
 from fastapi import FastAPI
 
 from tests.conftest import TEST_PRIVATE_KEY, TEST_PUBLIC_KEY
@@ -28,9 +28,18 @@ def test_identity_plugin_name(settings):
 
 
 def test_identity_plugin_migrations(settings):
-    """IdentityPlugin.migrations() returns a non-empty list."""
+    """IdentityPlugin contributes one typed, wheel-safe migration descriptor."""
     plugin = IdentityPlugin(settings=settings)
-    assert len(plugin.migrations()) > 0
+
+    migrations = plugin.migrations()
+
+    assert isinstance(migrations, tuple)
+    assert len(migrations) == 1
+    descriptor = migrations[0]
+    assert isinstance(descriptor, PluginMigration)
+    assert descriptor.name == "identity"
+    assert descriptor.depends_on == ()
+    assert descriptor.versions.name == "versions"
 
 
 def test_identity_plugin_settings_class(settings):

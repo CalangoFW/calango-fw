@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from importlib.resources import files
 from typing import ClassVar
 
 import redis.asyncio as redis
+from calango_plugin_base import PluginMigration
 from fastapi import FastAPI, Request, Response
 from pydantic_settings import BaseSettings
 from slowapi.errors import RateLimitExceeded
@@ -95,9 +97,10 @@ class IdentityPlugin:
         if self._owned_redis_client is not None:
             await self._owned_redis_client.aclose()
 
-    def migrations(self) -> list[str]:
-        """Return Alembic migration paths for identity tables."""
-        return ["calango_identity.migrations"]
+    def migrations(self) -> tuple[PluginMigration, ...]:
+        """Return the wheel-safe location for future identity revisions."""
+        versions = files("calango_identity").joinpath("migrations", "versions")
+        return (PluginMigration("identity", versions, ()),)
 
     def settings(self) -> type[BaseSettings]:
         """Return the IdentitySettings class."""
