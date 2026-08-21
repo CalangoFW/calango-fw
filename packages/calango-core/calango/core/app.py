@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from calango_plugin_base import PluginBase
-from fastapi import Depends, FastAPI
+from fastapi import APIRouter, Depends, FastAPI
 from starlette.types import ASGIApp
 
 from calango.config import CalangoSettings, SecuritySettings
@@ -12,6 +12,7 @@ from calango.core.database import DatabaseRuntime
 from calango.core.guards import (
     RequestGuard,
     RequestGuardMiddleware,
+    guard_included_router_routes,
     request_guard_dependency,
 )
 from calango.core.handlers import calango_exception_handler, unhandled_exception_handler
@@ -73,6 +74,10 @@ class Calango(FastAPI):
         if self._startup_started:
             raise RuntimeError("Request guards cannot be registered after startup begins")
         self._request_guards = (*self._request_guards, guard)
+
+    def include_router(self, router: APIRouter, **kwargs: Any) -> None:
+        guard_included_router_routes(router.routes)
+        super().include_router(router, **kwargs)
 
     def mount(  # ty: ignore[invalid-method-override]
         self,

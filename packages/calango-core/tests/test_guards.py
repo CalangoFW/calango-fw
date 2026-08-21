@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 from fastapi import APIRouter, FastAPI, Request, WebSocket
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.testclient import TestClient
 
 from calango.config import CalangoSettings, SecuritySettings
@@ -89,6 +89,54 @@ def test_guard_covers_routes_in_nested_api_routers(app: Calango) -> None:
     assert selected_endpoints == [nested]
 
 
+def test_guard_covers_starlette_route_included_from_an_api_router(
+    app: Calango,
+) -> None:
+    router = APIRouter()
+    selected_endpoints = []
+
+    async def included(_request: Request) -> JSONResponse:
+        return JSONResponse({"ok": True})
+
+    router.add_route("/included-starlette", included)
+
+    async def deny(request: Request) -> None:
+        selected_endpoints.append(request.scope["endpoint"])
+        raise AuthenticationError("Authentication required")
+
+    app.add_request_guard(deny)
+    app.include_router(router)
+
+    assert TestClient(app).get("/included-starlette").status_code == 401
+    assert len(selected_endpoints) == 1
+    assert selected_endpoints[0] is not None
+
+
+def test_guard_covers_private_mount_included_from_an_api_router(
+    app: Calango,
+) -> None:
+    router = APIRouter()
+    child = FastAPI()
+    selected_endpoints = []
+
+    @child.get("/")
+    async def child_root() -> dict[str, bool]:
+        return {"ok": True}
+
+    router.mount("/included-child", child)
+
+    async def deny(request: Request) -> None:
+        selected_endpoints.append(request.scope["endpoint"])
+        raise AuthenticationError("Authentication required")
+
+    app.add_request_guard(deny)
+    app.include_router(router)
+
+    assert TestClient(app).get("/included-child/").status_code == 401
+    assert len(selected_endpoints) == 1
+    assert selected_endpoints[0] is not None
+
+
 def test_request_guards_run_in_registration_order(app: Calango) -> None:
     calls = []
 
@@ -109,6 +157,25 @@ def test_request_guards_run_in_registration_order(app: Calango) -> None:
 
     assert response.status_code == 200
     assert calls == [("first", ordered), ("second", ordered)]
+
+
+def test_guard_can_read_body_without_consuming_endpoint_payload(app: Calango) -> None:
+    bodies_seen_by_guard = []
+
+    async def read_body(request: Request) -> None:
+        bodies_seen_by_guard.append(await request.body())
+
+    app.add_request_guard(read_body)
+
+    @app.post("/echo-body")
+    async def echo_body(request: Request) -> JSONResponse:
+        return JSONResponse({"body": (await request.body()).decode()})
+
+    response = TestClient(app).post("/echo-body", content=b"same-payload")
+
+    assert response.status_code == 200
+    assert response.json() == {"body": "same-payload"}
+    assert bodies_seen_by_guard == [b"same-payload"]
 
 
 def test_mount_is_guarded_by_default(app: Calango) -> None:
