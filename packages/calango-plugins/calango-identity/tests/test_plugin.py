@@ -183,6 +183,26 @@ def test_plugin_lifespan_closes_owned_async_and_sync_resources_once(
     assert sync_client.close_calls == 1
 
 
+def test_plugin_closes_owned_resources_after_every_lifespan_cycle(monkeypatch, settings):
+    async_client = CloseTrackingRedis()
+    sync_client = CloseTrackingSyncClient()
+    limiter = CloseTrackingLimiter(sync_client)
+    monkeypatch.setattr(
+        "calango_identity.plugin.redis.from_url",
+        lambda *args, **kwargs: async_client,
+    )
+    monkeypatch.setattr("calango_identity.plugin.make_limiter", lambda *args: limiter)
+    app = Calango()
+    app.include_plugin(IdentityPlugin(settings=settings))
+
+    for _ in range(2):
+        with TestClient(app):
+            pass
+
+    assert async_client.close_calls == 2
+    assert sync_client.close_calls == 2
+
+
 def test_plugin_does_not_close_injected_resources(settings):
     async_client = CloseTrackingRedis()
     sync_client = CloseTrackingSyncClient()

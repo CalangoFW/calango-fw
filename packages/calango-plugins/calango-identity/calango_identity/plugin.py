@@ -61,7 +61,6 @@ class IdentityPlugin:
             self._owned_limiter = limiter
         self._limiter = limiter
         self._owned_redis_client: redis.Redis | None = None
-        self._owned_resources_closed = False
         if refresh_store is not None:
             self.refresh_store = refresh_store
         else:
@@ -112,11 +111,11 @@ class IdentityPlugin:
         app.add_plugin_lifespan(owned_resource_lifespan)
 
     async def _close_owned_resources(self) -> None:
-        """Close constructed async and sync backends at most once."""
-        if self._owned_resources_closed:
-            return
-        self._owned_resources_closed = True
+        """Close constructed async and sync backends at the end of each lifespan.
 
+        Both clients reconnect lazily, so a later lifespan cycle reopens them and
+        must close them again.
+        """
         try:
             if self._owned_redis_client is not None:
                 await self._owned_redis_client.aclose()
