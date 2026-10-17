@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -108,6 +109,34 @@ async def unavailable_client(
         settings=settings,
         get_db=get_db,
         refresh_store=UnavailableRefreshTokenStore(),
+        limiter=limiter,
+    )
+    app.include_router(router)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac
+
+
+DEAD_REDIS_HOST = "127.0.0.1:1"
+
+
+@pytest.fixture
+async def dead_limiter_client(
+    session: AsyncSession,
+    settings: IdentitySettings,
+    refresh_store: InMemoryRefreshTokenStore,
+):
+    """Auth app whose rate-limit storage points at a port nothing listens on."""
+    limiter = make_limiter(f"redis://{DEAD_REDIS_HOST}/0")
+    app = Calango()
+    app.state.limiter = limiter
+
+    async def get_db():
+        yield session
+
+    router = make_auth_router(
+        settings=settings,
+        get_db=get_db,
+        refresh_store=refresh_store,
         limiter=limiter,
     )
     app.include_router(router)
@@ -397,6 +426,62 @@ async def test_logout_returns_uniform_503_when_store_is_unavailable(unavailable_
     assert response.status_code == 503
     assert response.json()["error"] == "service_unavailable"
     assert response.json()["message"] == "Authentication service unavailable"
+
+
+async def test_rate_limit_storage_outage_returns_uniform_503_to_login(dead_limiter_client):
+    response = await dead_limiter_client.post(
+        "/auth/login",
+        data={"username": "limiter-outage@example.com", "password": "SecurePassword123!"},
+    )
+    assert response.status_code == 503, response.text
+    assert response.json()["error"] == "service_unavailable"
+    assert response.json()["message"] == "Authentication service unavailable"
+    assert DEAD_REDIS_HOST not in response.text
+
+
+async def test_rate_limit_storage_outage_is_logged_without_credentials(dead_limiter_client, caplog):
+    caplog.set_level(logging.ERROR, logger="calango_identity.router")
+    await dead_limiter_client.post(
+        "/auth/login",
+        data={"username": "logged-outage@example.com", "password": "SecretPassword123!"},
+    )
+
+    records = [record for record in caplog.records if record.name == "calango_identity.router"]
+    assert len(records) == 1
+    assert records[0].error_type == "ConnectionError"
+    assert records[0].exc_info is None
+    message = records[0].getMessage()
+    for secret in ("logged-outage@example.com", "SecretPassword123!", DEAD_REDIS_HOST):
+        assert secret not in message
+
+
+async def test_refresh_store_outage_is_logged_without_diagnostics(unavailable_client, caplog):
+    caplog.set_level(logging.ERROR, logger="calango_identity.router")
+    await unavailable_client.post("/auth/refresh", json={"refresh_token": "x" * 43})
+
+    records = [record for record in caplog.records if record.name == "calango_identity.router"]
+    assert len(records) == 1
+    assert records[0].error_type == "RefreshTokenStorageError"
+    assert "sensitive storage diagnostics" not in records[0].getMessage()
+
+
+async def test_login_response_is_not_cacheable(client):
+    await register_user(client, "no-store-login@example.com")
+    response = await client.post(
+        "/auth/login",
+        data={"username": "no-store-login@example.com", "password": "SecurePassword123!"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["pragma"] == "no-cache"
+
+
+async def test_refresh_response_is_not_cacheable(client):
+    login = await login_user(client, "no-store-refresh@example.com")
+    response = await client.post("/auth/refresh", json={"refresh_token": login["refresh_token"]})
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["pragma"] == "no-cache"
 
 
 async def test_forgot_password_returns_202(client):
