@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 import pytest
 from fastapi import APIRouter, Depends, FastAPI, Request, WebSocket
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.routing import Mount
 
@@ -678,6 +679,7 @@ async def test_unguarded_scopes_keep_original_receive(scope, routes, public_moun
         lambda: public_mounts,
         lambda: routes,
         owner,
+        lambda: None,
     )
 
     await middleware(scope, original_receive, send)
@@ -713,6 +715,7 @@ async def test_public_mount_keeps_original_receive() -> None:
         lambda: (mount,),
         lambda: [mount],
         owner,
+        lambda: None,
     )
     scope = {
         "type": "http",
@@ -838,6 +841,73 @@ def test_dependency_request_guard_survives_public_override_clear(app: Calango) -
         ).status_code
         == 200
     )
+
+
+async def _authorization_header(request: Request) -> str | None:
+    return request.headers.get("authorization")
+
+
+async def _require_allowed_token(_request: Request, token: object) -> None:
+    if token != "Bearer allowed":
+        raise AuthenticationError("Authentication required")
+
+
+def test_external_guard_state_reaches_private_mount(app: Calango) -> None:
+    async def store_context(request: Request, context: object) -> None:
+        request.scope["guard_context"] = context
+
+    app.add_dependency_request_guard(
+        store_context,
+        dependency=_authorization_header,
+        resolver=_authorization_header,
+    )
+    child = FastAPI()
+
+    @child.get("/")
+    async def child_root(request: Request) -> dict[str, object]:
+        return {"context": request.scope.get("guard_context")}
+
+    app.mount("/mounted", child)
+
+    response = TestClient(app).get("/mounted/", headers={"Authorization": "Bearer allowed"})
+
+    assert response.json() == {"context": "Bearer allowed"}
+
+
+def test_dependency_guard_covers_api_route_appended_without_app_dependencies(
+    app: Calango,
+) -> None:
+    async def appended() -> dict[str, bool]:
+        return {"ok": True}
+
+    app.add_dependency_request_guard(
+        _require_allowed_token,
+        dependency=_authorization_header,
+        resolver=_authorization_header,
+    )
+    app.router.routes.append(APIRoute("/appended", appended))
+    client = TestClient(app, raise_server_exceptions=False)
+
+    assert client.get("/appended").status_code == 401
+    assert client.get("/appended", headers={"Authorization": "Bearer allowed"}).status_code == 200
+
+
+def test_public_override_of_guard_dependency_supplies_guard_context(app: Calango) -> None:
+    @app.get("/private")
+    async def private_route() -> dict[str, bool]:
+        return {"ok": True}
+
+    app.add_dependency_request_guard(
+        _require_allowed_token,
+        dependency=_authorization_header,
+        resolver=_authorization_header,
+    )
+    app.dependency_overrides[_authorization_header] = lambda: "Bearer allowed"
+    client = TestClient(app, raise_server_exceptions=False)
+
+    assert client.get("/private").status_code == 200
+    app.dependency_overrides.clear()
+    assert client.get("/private").status_code == 401
 
 
 def test_private_mount_preserves_root_path_and_streaming(app: Calango) -> None:

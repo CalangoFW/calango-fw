@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi import Depends
-from fastapi.routing import APIRoute, iter_route_contexts
+from fastapi.routing import APIRoute, RouteContext, iter_route_contexts
 from starlette.requests import HTTPConnection, Request
 from starlette.routing import BaseRoute, Match, Mount
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -56,7 +56,9 @@ class RequestGuardDependencyOverrides(dict[Callable[..., Any], Callable[..., Any
         if key is self.context_dependency:
             if not _HTTP_REQUEST_SCOPE.get() or self._context_override is None:
                 return default
-            return self._context_override
+            # A public override of the registered dependency (e.g. a test user)
+            # supplies the guard context; clearing public overrides restores it.
+            return super().get(self._context_override, self._context_override)
         return super().get(key, default)
 
 
@@ -160,8 +162,10 @@ class RequestGuardMiddleware:
 
     Matching walks FastAPI's effective route tree, so routes on included, nested
     and late-extended routers resolve exactly as FastAPI dispatches them. API
-    routes receive the dependency guard through FastAPI DI; Starlette routes and
-    private mounts receive it here because FastAPI dependencies never reach them.
+    routes that carry the guard dependency receive it through FastAPI DI; every
+    other boundary (Starlette routes, private mounts, API routes added without
+    the application dependencies) receives it here, so no route fails open.
+    Scope keys a guard adds are copied to the downstream scope.
     """
 
     def __init__(
@@ -170,25 +174,36 @@ class RequestGuardMiddleware:
         public_mount_provider: PublicMountProvider,
         route_provider: RouteProvider,
         owner: Any,
+        guard_dependency: RequestGuardDependency,
     ) -> None:
         self.app = app
         self.public_mount_provider = public_mount_provider
         self.route_provider = route_provider
         self.owner = owner
+        self.guard_dependency = guard_dependency
 
-    def _match(self, scope: Scope) -> tuple[BaseRoute | None, Scope]:
-        partial: tuple[BaseRoute, Scope] | None = None
+    def _match(self, scope: Scope) -> tuple[RouteContext | None, Scope]:
+        partial: tuple[RouteContext, Scope] | None = None
 
         for route_context in iter_route_contexts(self.route_provider()):
             match, child_scope = route_context.matches(scope)
             if match == Match.FULL:
-                return route_context.original_route, child_scope
+                return route_context, child_scope
             if match == Match.PARTIAL and partial is None:
-                partial = (route_context.original_route, child_scope)
+                partial = (route_context, child_scope)
 
         if partial is not None:
             return partial
         return None, {}
+
+    def _guarded_by_dependency(self, route_context: RouteContext) -> bool:
+        """Return whether FastAPI DI will run the guard boundary for this route."""
+        if not isinstance(route_context.original_route, APIRoute):
+            return False
+        return any(
+            getattr(dependency, "dependency", None) is self.guard_dependency
+            for dependency in route_context.dependencies
+        )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         token = _HTTP_REQUEST_SCOPE.set(scope["type"] == "http")
@@ -202,18 +217,19 @@ class RequestGuardMiddleware:
             await self.app(scope, receive, send)
             return
 
-        route, child_scope = self._match(scope)
+        route_context, child_scope = self._match(scope)
+        route = None if route_context is None else route_context.original_route
         is_public_mount = isinstance(route, Mount) and any(
             route is public_mount for public_mount in self.public_mount_provider()
         )
-        if route is None or "endpoint" not in child_scope or is_public_mount:
+        if route_context is None or "endpoint" not in child_scope or is_public_mount:
             await self.app(scope, receive, send)
             return
 
-        is_api_route = isinstance(route, APIRoute)
+        guarded_by_dependency = self._guarded_by_dependency(route_context)
         should_run = (
             has_simple_request_guards(self.owner)
-            if is_api_route
+            if guarded_by_dependency
             else has_external_request_guards(self.owner)
         )
         if not should_run:
@@ -225,9 +241,16 @@ class RequestGuardMiddleware:
         routed_scope.update(child_scope)
         replayable_receive = ReplayableReceive(receive)
         request = Request(routed_scope, receive=replayable_receive)
-        if is_api_route:
+        if guarded_by_dependency:
             await run_request_guards(request, self.owner)
         else:
             await run_external_request_guards(request, self.owner)
+        scope.update(
+            {
+                key: value
+                for key, value in routed_scope.items()
+                if key not in scope and key not in child_scope
+            }
+        )
         replayable_receive.replay()
         await self.app(scope, replayable_receive, send)

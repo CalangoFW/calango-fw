@@ -65,6 +65,7 @@ class Calango(FastAPI):
             lambda: self._public_mounts,
             lambda: self.router.routes,
             self,
+            request_guard_dependency,
         )
 
         self.settings = settings
