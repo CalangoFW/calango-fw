@@ -10,8 +10,9 @@ from calango_identity.models import Permission, Role, User
 from calango_identity.plugin import IdentityPlugin
 from calango_identity.refresh_tokens import InMemoryRefreshTokenStore
 from calango_identity.settings import IdentitySettings
-from fastapi import APIRouter, Depends, FastAPI, Request
+from fastapi import APIRouter, Depends, FastAPI, Request, WebSocket
 from fastapi.responses import JSONResponse
+from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import (
@@ -696,3 +697,24 @@ async def test_permission_route_with_permission_returns_200(rbac_app):
         response = await client.get("/reports", headers=headers)
 
     assert response.status_code == 200
+
+
+def test_websocket_routes_are_outside_identity_authentication():
+    """Documented exclusion: WebSocket endpoints must authenticate themselves."""
+    app = Calango()
+
+    @app.websocket("/ws")
+    async def websocket_endpoint(websocket: WebSocket):
+        await websocket.accept()
+        await websocket.send_text("anonymous")
+        await websocket.close()
+
+    settings = IdentitySettings(
+        PRIVATE_KEY=TEST_PRIVATE_KEY,
+        PUBLIC_KEY=TEST_PUBLIC_KEY,
+        REDIS_URL="memory://",
+    )
+    app.include_plugin(IdentityPlugin(settings=settings, refresh_store=InMemoryRefreshTokenStore()))
+
+    with TestClient(app).websocket_connect("/ws") as connection:
+        assert connection.receive_text() == "anonymous"

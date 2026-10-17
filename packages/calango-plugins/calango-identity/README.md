@@ -144,6 +144,17 @@ async def status() -> dict[str, str]:
     return {"status": "ok"}
 ```
 
+On a `@public` route, `get_current_user` returns the user when the request
+carries a valid token and `None` when it is anonymous, so one handler can serve
+both:
+
+```python
+@router.get("/feed")
+@public
+async def feed(user: User | None = Depends(get_current_user)) -> dict[str, bool]:
+    return {"personalized": user is not None}
+```
+
 Use `require_permission()` as a dependency to require an RBAC permission code:
 
 ```python
@@ -159,3 +170,24 @@ async def create_report(
 ) -> dict[str, str]:
     return {"created_by": str(user.id)}
 ```
+
+`require_permission()` returns `401` when the request is anonymous (also on a
+`@public` route) and `403` when the user lacks the permission.
+
+## Testing authenticated routes
+
+Override `get_current_user` to run a test as a fixed user without issuing
+tokens. The override also satisfies the authentication guard, and clearing
+`app.dependency_overrides` restores normal enforcement:
+
+```python
+app.dependency_overrides[get_current_user] = lambda: test_user
+```
+
+## WebSocket endpoints
+
+Identity's authentication guard covers HTTP routes and mounts only. WebSocket
+endpoints are **not** authenticated by the plugin: a WebSocket route accepts
+anonymous connections unless the endpoint verifies credentials itself (for
+example, by validating a token sent in the first message before accepting any
+other traffic).

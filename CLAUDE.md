@@ -537,7 +537,8 @@ async def request_refund(context: AgentContext, order_id: str, reason: str):
 ### Posture: secure by default, explicit to override
 
 ```python
-# All endpoints require auth by default (identity plugin active)
+# All HTTP endpoints and mounts require auth by default (identity plugin active).
+# WebSocket endpoints are not covered — they must authenticate themselves.
 @router.get("/orders")
 async def list_orders(current_user: User = Depends(get_current_user)):
     ...
