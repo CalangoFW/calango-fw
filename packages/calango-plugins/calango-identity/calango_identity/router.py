@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.routing import APIRoute
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi_users import FastAPIUsers, exceptions
+from limits.errors import StorageError
 from pydantic import ValidationError
 from redis.exceptions import RedisError
 from slowapi import Limiter
@@ -80,7 +81,7 @@ def _translate_rate_limit_storage_errors(endpoint: Callable[..., Awaitable[Any]]
     async def translated(*args: Any, **kwargs: Any) -> Any:
         try:
             return await endpoint(*args, **kwargs)
-        except RedisError as exc:
+        except (RedisError, StorageError) as exc:
             _log_storage_unavailable("rate limit", exc)
         raise ServiceUnavailableError("Authentication service unavailable")
 

@@ -18,6 +18,7 @@ from calango_identity.router import _parse_refresh_token, make_auth_router
 from calango_identity.settings import IdentitySettings
 from httpx import ASGITransport, AsyncClient, Response
 from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from starlette.requests import Request as StarletteRequest
 
@@ -119,14 +120,25 @@ async def unavailable_client(
 DEAD_REDIS_HOST = "127.0.0.1:1"
 
 
-@pytest.fixture
+@pytest.fixture(
+    params=[
+        pytest.param(({}, "ConnectionError"), id="redis-error"),
+        pytest.param(({"wrap_exceptions": True}, "StorageError"), id="wrapped-storage-error"),
+    ]
+)
 async def dead_limiter_client(
+    request: pytest.FixtureRequest,
     session: AsyncSession,
     settings: IdentitySettings,
     refresh_store: InMemoryRefreshTokenStore,
 ):
     """Auth app whose rate-limit storage points at a port nothing listens on."""
-    limiter = make_limiter(f"redis://{DEAD_REDIS_HOST}/0")
+    storage_options, error_type = request.param
+    limiter = Limiter(
+        key_func=get_remote_address,
+        storage_uri=f"redis://{DEAD_REDIS_HOST}/0",
+        storage_options=storage_options,
+    )
     app = Calango()
     app.state.limiter = limiter
 
@@ -141,7 +153,7 @@ async def dead_limiter_client(
     )
     app.include_router(router)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        yield ac
+        yield ac, error_type
 
 
 async def register_user(client: AsyncClient, email: str) -> None:
@@ -429,7 +441,8 @@ async def test_logout_returns_uniform_503_when_store_is_unavailable(unavailable_
 
 
 async def test_rate_limit_storage_outage_returns_uniform_503_to_login(dead_limiter_client):
-    response = await dead_limiter_client.post(
+    client, _ = dead_limiter_client
+    response = await client.post(
         "/auth/login",
         data={"username": "limiter-outage@example.com", "password": "SecurePassword123!"},
     )
@@ -440,15 +453,16 @@ async def test_rate_limit_storage_outage_returns_uniform_503_to_login(dead_limit
 
 
 async def test_rate_limit_storage_outage_is_logged_without_credentials(dead_limiter_client, caplog):
+    client, error_type = dead_limiter_client
     caplog.set_level(logging.ERROR, logger="calango_identity.router")
-    await dead_limiter_client.post(
+    await client.post(
         "/auth/login",
         data={"username": "logged-outage@example.com", "password": "SecretPassword123!"},
     )
 
     records = [record for record in caplog.records if record.name == "calango_identity.router"]
     assert len(records) == 1
-    assert records[0].error_type == "ConnectionError"
+    assert records[0].error_type == error_type
     assert records[0].exc_info is None
     message = records[0].getMessage()
     for secret in ("logged-outage@example.com", "SecretPassword123!", DEAD_REDIS_HOST):
