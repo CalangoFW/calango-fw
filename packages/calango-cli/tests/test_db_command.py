@@ -1,3 +1,4 @@
+import logging
 import os
 import subprocess
 import sys
@@ -843,6 +844,25 @@ def test_generated_alembic_env_loads_plugins_before_metadata(monkeypatch, tmp_pa
         "models:app.contexts",
         "metadata",
     ]
+
+
+def test_generated_alembic_env_keeps_existing_loggers_enabled(monkeypatch, tmp_path):
+    """In-process migrations must not silence framework, plugin or security logging."""
+    result = runner.invoke(app, ["new", "my-api", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+    project = tmp_path / "my-api"
+    existing_logger = logging.getLogger("calango.tests.existing_before_migrations")
+    monkeypatch.setattr(existing_logger, "disabled", False)
+    monkeypatch.setattr("importlib.metadata.entry_points", lambda **kwargs: ())
+    monkeypatch.setenv("SECURITY__SECRET_KEY", "test-only-secret")
+    monkeypatch.setenv("DATABASE__URL", "sqlite+aiosqlite:///unused.db")
+    monkeypatch.chdir(project)
+
+    CommandLine(prog="alembic").main(
+        ["-c", str(project / "alembic.ini"), "upgrade", "heads", "--sql"]
+    )
+
+    assert existing_logger.disabled is False
 
 
 def test_generated_alembic_cli_translates_plugin_failure_without_traceback_or_cause(
