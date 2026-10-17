@@ -5,7 +5,7 @@ from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontext
 from typing import Any
 
 from calango_plugin_base import PluginBase
-from fastapi import APIRouter, Depends, FastAPI
+from fastapi import Depends, FastAPI
 from starlette.routing import Mount
 from starlette.types import ASGIApp
 
@@ -14,13 +14,11 @@ from calango.core.database import DatabaseRuntime
 from calango.core.guards import (
     DependencyRequestGuard,
     DependencyRequestGuardRegistration,
-    GuardedRouterUpdates,
     RequestGuard,
     RequestGuardDependency,
     RequestGuardDependencyOverrides,
     RequestGuardMiddleware,
     RequestGuardResolver,
-    guarded_router_overlay,
     request_guard_dependency_boundary,
 )
 from calango.core.handlers import calango_exception_handler, unhandled_exception_handler
@@ -55,10 +53,12 @@ class Calango(FastAPI):
 
         super().__init__(**kwargs)
 
-        self.dependency_overrides = RequestGuardDependencyOverrides(
+        request_guard_dependency_overrides = RequestGuardDependencyOverrides(
             self._request_guard_context_dependency,
             self.dependency_overrides,
         )
+        self.dependency_overrides = request_guard_dependency_overrides
+        self._request_guard_dependency_overrides = request_guard_dependency_overrides
 
         self.router.middleware_stack = RequestGuardMiddleware(
             self.router.app,
@@ -130,24 +130,7 @@ class Calango(FastAPI):
             dependency=dependency,
             resolver=resolver,
         )
-        self.dependency_overrides[self._request_guard_context_dependency] = dependency
-
-    def include_router(self, router: APIRouter, **kwargs: Any) -> None:
-        existing_route_ids = frozenset(id(route) for route in router.routes)
-        overlay = guarded_router_overlay(router, self)
-        if overlay.routes:
-            overlay_kwargs: dict[str, Any] = dict(kwargs)
-            overlay_kwargs["include_in_schema"] = False
-            super().include_router(overlay, **overlay_kwargs)
-        self.router.routes.append(
-            GuardedRouterUpdates(
-                router,
-                self,
-                prefix=kwargs.get("prefix", ""),
-                existing_route_ids=existing_route_ids,
-            )
-        )
-        super().include_router(router, **kwargs)
+        self._request_guard_dependency_overrides.set_context_override(dependency)
 
     def mount(  # ty: ignore[invalid-method-override]
         self,

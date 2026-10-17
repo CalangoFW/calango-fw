@@ -3,14 +3,12 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
-from functools import update_wrapper
 from typing import Any
 
 from fastapi import Depends
-from fastapi.routing import APIRoute, APIRouter
-from starlette.datastructures import URLPath
+from fastapi.routing import APIRoute, iter_route_contexts
 from starlette.requests import HTTPConnection, Request
-from starlette.routing import BaseRoute, Match, Mount, NoMatchFound, Route, WebSocketRoute
+from starlette.routing import BaseRoute, Match, Mount
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 RequestGuard = Callable[[Request], Awaitable[None]]
@@ -22,7 +20,6 @@ RouteProvider = Callable[[], list[BaseRoute]]
 
 _GUARDED_OWNERS_SCOPE_KEY = "calango.request_guard_owners"
 _DEPENDENCY_GUARDED_OWNERS_SCOPE_KEY = "calango.dependency_request_guard_owners"
-_DYNAMIC_ROUTE_SCOPE_KEY = "calango.dynamic_guarded_route"
 _UNRESOLVED_CONTEXT = object()
 _HTTP_REQUEST_SCOPE = ContextVar("calango_http_request_scope", default=False)
 
@@ -46,10 +43,20 @@ class RequestGuardDependencyOverrides(dict[Callable[..., Any], Callable[..., Any
     ) -> None:
         super().__init__(initial)
         self.context_dependency = context_dependency
+        self._context_override: RequestGuardDependency | None = None
+
+    def set_context_override(self, dependency: RequestGuardDependency) -> None:
+        """Set framework-owned state outside the public override mapping."""
+        self._context_override = dependency
+
+    def __bool__(self) -> bool:
+        return self._context_override is not None or super().__len__() > 0
 
     def get(self, key: Callable[..., Any], default: Any = None) -> Any:
-        if key is self.context_dependency and not _HTTP_REQUEST_SCOPE.get():
-            return default
+        if key is self.context_dependency:
+            if not _HTTP_REQUEST_SCOPE.get() or self._context_override is None:
+                return default
+            return self._context_override
         return super().get(key, default)
 
 
@@ -148,179 +155,14 @@ class ReplayableReceive:
         self.replay_index = 0
 
 
-class GuardedASGIApp:
-    """Run guards with a routed request, then delegate without consuming its body."""
-
-    def __init__(
-        self,
-        app: ASGIApp,
-        owner: Any,
-        *,
-        endpoint: Any | None = None,
-    ) -> None:
-        self.app = app
-        self.owner = owner
-        if endpoint is not None:
-            update_wrapper(self, endpoint)
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or not has_external_request_guards(self.owner):
-            await self.app(scope, receive, send)
-            return
-
-        replayable_receive = ReplayableReceive(receive)
-        request = Request(scope, receive=replayable_receive)
-        await run_external_request_guards(request, self.owner)
-        replayable_receive.replay()
-        await self.app(scope, replayable_receive, send)
-
-
-class RoutedASGIApp:
-    """Delegate to an existing Route app while retaining endpoint metadata."""
-
-    def __init__(self, app: ASGIApp, endpoint: Any) -> None:
-        self.app = app
-        update_wrapper(self, endpoint)
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        await self.app(scope, receive, send)
-
-
-def guarded_router_overlay(router: APIRouter, owner: Any) -> APIRouter:
-    """Snapshot routes in order, guarding included Starlette Route and Mount entries."""
-
-    guarded_routes: list[BaseRoute] = []
-    for route in router.routes:
-        if isinstance(route, (APIRoute, WebSocketRoute)):
-            guarded_routes.append(route)
-            continue
-
-        if isinstance(route, Route):
-            endpoint = GuardedASGIApp(route.app, owner, endpoint=route.endpoint)
-            guarded_routes.append(
-                Route(
-                    route.path,
-                    endpoint=endpoint,
-                    methods=route.methods,
-                    name=route.name,
-                    include_in_schema=route.include_in_schema,
-                )
-            )
-            continue
-
-        if isinstance(route, Mount):
-            guarded_app = GuardedASGIApp(route.app, owner)
-            guarded_routes.append(Mount(route.path, app=guarded_app, name=route.name))
-            continue
-
-        guarded_routes.append(route)
-
-    return APIRouter(routes=guarded_routes)
-
-
-class GuardedRouterUpdates(BaseRoute):
-    """Route Starlette entries appended after an APIRouter was included.
-
-    The overlay observes only the router's public ``routes`` list and never mutates
-    the caller-owned router. API routes are matched only to preserve source order;
-    FastAPI's included-router boundary remains responsible for handling them.
-    """
-
-    def __init__(
-        self,
-        router: APIRouter,
-        owner: Any,
-        *,
-        prefix: str,
-        existing_route_ids: frozenset[int],
-    ) -> None:
-        self.router = router
-        self.owner = owner
-        self.prefix = prefix
-        self.existing_route_ids = existing_route_ids
-
-    def _candidate(self, route: BaseRoute) -> tuple[BaseRoute, bool] | None:
-        path = getattr(route, "path", None)
-        if path is None:
-            return None
-        prefixed_path = f"{self.prefix}{path}"
-
-        if isinstance(route, APIRoute):
-            return (
-                Route(
-                    prefixed_path,
-                    endpoint=route.endpoint,
-                    methods=route.methods,
-                    name=route.name,
-                ),
-                False,
-            )
-        if isinstance(route, WebSocketRoute):
-            return None
-        if isinstance(route, Route):
-            return (
-                Route(
-                    prefixed_path,
-                    endpoint=RoutedASGIApp(route.app, route.endpoint),
-                    methods=route.methods,
-                    name=route.name,
-                    include_in_schema=route.include_in_schema,
-                ),
-                True,
-            )
-        if isinstance(route, Mount):
-            return Mount(prefixed_path, app=route.app, name=route.name), True
-        return None
-
-    def _late_candidates(self) -> list[tuple[BaseRoute, bool]]:
-        candidates: list[tuple[BaseRoute, bool]] = []
-        for route in self.router.routes:
-            if id(route) in self.existing_route_ids:
-                continue
-            candidate = self._candidate(route)
-            if candidate is not None:
-                candidates.append(candidate)
-        return candidates
-
-    def matches(self, scope: Scope) -> tuple[Match, Scope]:
-        partial: tuple[BaseRoute, bool, Scope] | None = None
-
-        for candidate, handles_route in self._late_candidates():
-            match, child_scope = candidate.matches(scope)
-            if match == Match.FULL:
-                if not handles_route:
-                    return Match.NONE, {}
-                child_scope[_DYNAMIC_ROUTE_SCOPE_KEY] = candidate
-                return match, child_scope
-            if match == Match.PARTIAL and partial is None:
-                partial = candidate, handles_route, child_scope
-
-        if partial is None:
-            return Match.NONE, {}
-        candidate, handles_route, child_scope = partial
-        if not handles_route:
-            return Match.NONE, {}
-        child_scope[_DYNAMIC_ROUTE_SCOPE_KEY] = candidate
-        return Match.PARTIAL, child_scope
-
-    def url_path_for(self, name: str, /, **path_params: Any) -> URLPath:
-        for candidate, handles_route in self._late_candidates():
-            try:
-                path = candidate.url_path_for(name, **path_params)
-            except NoMatchFound:
-                continue
-            if handles_route:
-                return path
-            break
-        raise NoMatchFound(name, path_params)
-
-    async def handle(self, scope: Scope, receive: Receive, send: Send) -> None:
-        candidate = scope.pop(_DYNAMIC_ROUTE_SCOPE_KEY)
-        await candidate.handle(scope, receive, send)
-
-
 class RequestGuardMiddleware:
-    """Run application guards after Starlette has selected an HTTP route."""
+    """Run application guards for the HTTP route FastAPI will select.
+
+    Matching walks FastAPI's effective route tree, so routes on included, nested
+    and late-extended routers resolve exactly as FastAPI dispatches them. API
+    routes receive the dependency guard through FastAPI DI; Starlette routes and
+    private mounts receive it here because FastAPI dependencies never reach them.
+    """
 
     def __init__(
         self,
@@ -337,12 +179,12 @@ class RequestGuardMiddleware:
     def _match(self, scope: Scope) -> tuple[BaseRoute | None, Scope]:
         partial: tuple[BaseRoute, Scope] | None = None
 
-        for route in self.route_provider():
-            match, child_scope = route.matches(scope)
+        for route_context in iter_route_contexts(self.route_provider()):
+            match, child_scope = route_context.matches(scope)
             if match == Match.FULL:
-                return route, child_scope
+                return route_context.original_route, child_scope
             if match == Match.PARTIAL and partial is None:
-                partial = (route, child_scope)
+                partial = (route_context.original_route, child_scope)
 
         if partial is not None:
             return partial

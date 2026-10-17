@@ -173,6 +173,275 @@ def test_guard_covers_starlette_routes_and_mounts_added_after_router_inclusion(
     ]
 
 
+def test_dependency_guard_covers_late_nested_starlette_route_and_mount(
+    app: Calango,
+) -> None:
+    parent = APIRouter()
+    child = APIRouter()
+    mounted_app = FastAPI()
+
+    async def nested_route(_request: Request) -> JSONResponse:
+        return JSONResponse({"kind": "route"})
+
+    @mounted_app.get("/")
+    async def mounted_root() -> dict[str, str]:
+        return {"kind": "mount"}
+
+    async def token_dependency(request: Request) -> str | None:
+        return request.headers.get("authorization")
+
+    async def token_resolver(request: Request) -> str | None:
+        return request.headers.get("authorization")
+
+    async def require_token(_request: Request, token: object) -> None:
+        if token != "Bearer allowed":
+            raise AuthenticationError("Authentication required")
+
+    app.add_dependency_request_guard(
+        require_token,
+        dependency=token_dependency,
+        resolver=token_resolver,
+    )
+    app.include_router(parent, prefix="/parent")
+
+    child.add_route("/route", nested_route)
+    child.mount("/mount", mounted_app)
+    parent.include_router(child, prefix="/child")
+
+    client = TestClient(app)
+
+    assert client.get("/parent/child/route").status_code == 401
+    assert client.get("/parent/child/mount/").status_code == 401
+    assert (
+        client.get(
+            "/parent/child/route",
+            headers={"Authorization": "Bearer allowed"},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.get(
+            "/parent/child/mount/",
+            headers={"Authorization": "Bearer allowed"},
+        ).status_code
+        == 200
+    )
+
+
+@pytest.mark.parametrize("first_kind", ["api", "starlette"])
+def test_late_nested_guard_preserves_router_ownership_and_precedence(
+    app: Calango,
+    first_kind: str,
+) -> None:
+    parent = APIRouter()
+    child = APIRouter()
+
+    async def api_route() -> JSONResponse:
+        return JSONResponse({"kind": "api"}, headers={"x-route-kind": "api"})
+
+    async def starlette_route(_request: Request) -> JSONResponse:
+        return JSONResponse(
+            {"kind": "starlette"},
+            headers={"x-route-kind": "starlette"},
+        )
+
+    if first_kind == "api":
+        child.add_api_route("/collision", api_route, methods=["GET", "HEAD"])
+        child.add_route("/collision", starlette_route, methods=["GET", "HEAD"])
+    else:
+        child.add_route("/collision", starlette_route, methods=["GET", "HEAD"])
+        child.add_api_route("/collision", api_route, methods=["GET", "HEAD"])
+
+    child_routes = tuple(child.routes)
+
+    async def allow(_request: Request, _context: object) -> None:
+        pass
+
+    async def dependency(_request: Request) -> None:
+        pass
+
+    async def resolver(_request: Request) -> None:
+        pass
+
+    app.add_dependency_request_guard(
+        allow,
+        dependency=dependency,
+        resolver=resolver,
+    )
+    app.include_router(parent, prefix="/calango")
+    parent.include_router(child, prefix="/nested")
+    parent_routes = tuple(parent.routes)
+
+    calango_response = TestClient(app).head("/calango/nested/collision")
+
+    plain_app = FastAPI()
+    plain_app.include_router(parent, prefix="/plain")
+    plain_response = TestClient(plain_app).head("/plain/nested/collision")
+
+    assert calango_response.headers["x-route-kind"] == first_kind
+    assert plain_response.headers["x-route-kind"] == first_kind
+    assert tuple(parent.routes) == parent_routes
+    assert tuple(child.routes) == child_routes
+    assert all(
+        current is original for current, original in zip(parent.routes, parent_routes, strict=True)
+    )
+    assert all(
+        current is original for current, original in zip(child.routes, child_routes, strict=True)
+    )
+
+
+def test_late_nested_api_route_keeps_application_dependencies(app: Calango) -> None:
+    dependency_calls = []
+
+    async def application_dependency(request: Request) -> None:
+        dependency_calls.append(request.url.path)
+
+    guarded_app = Calango(
+        settings=app.settings,
+        dependencies=[Depends(application_dependency)],
+    )
+    parent = APIRouter()
+    child = APIRouter()
+
+    @child.get("/api")
+    async def child_api() -> dict[str, bool]:
+        return {"ok": True}
+
+    async def allow(_request: Request, _context: object) -> None:
+        pass
+
+    async def dependency(_request: Request) -> None:
+        pass
+
+    async def resolver(_request: Request) -> None:
+        pass
+
+    guarded_app.add_dependency_request_guard(
+        allow,
+        dependency=dependency,
+        resolver=resolver,
+    )
+    guarded_app.include_router(parent, prefix="/parent")
+    parent.include_router(child, prefix="/child")
+
+    response = TestClient(guarded_app, raise_server_exceptions=False).get("/parent/child/api")
+
+    assert response.status_code == 200
+    assert dependency_calls == ["/parent/child/api"]
+
+
+def test_late_nested_api_route_keeps_include_router_dependencies(app: Calango) -> None:
+    dependency_calls = []
+
+    async def include_dependency(request: Request) -> None:
+        dependency_calls.append(request.url.path)
+
+    parent = APIRouter()
+    child = APIRouter()
+
+    @child.get("/api")
+    async def child_api() -> dict[str, bool]:
+        return {"ok": True}
+
+    async def allow(_request: Request, _context: object) -> None:
+        pass
+
+    async def dependency(_request: Request) -> None:
+        pass
+
+    async def resolver(_request: Request) -> None:
+        pass
+
+    app.add_dependency_request_guard(
+        allow,
+        dependency=dependency,
+        resolver=resolver,
+    )
+    app.include_router(
+        parent,
+        prefix="/parent",
+        dependencies=[Depends(include_dependency)],
+    )
+    parent.include_router(child, prefix="/child")
+
+    response = TestClient(app, raise_server_exceptions=False).get("/parent/child/api")
+
+    assert response.status_code == 200
+    assert dependency_calls == ["/parent/child/api"]
+
+
+def test_dependency_guard_sees_endpoint_for_late_nested_api_route(app: Calango) -> None:
+    parent = APIRouter()
+    child = APIRouter()
+    selected_endpoints = []
+
+    async def dependency(_request: Request) -> None:
+        pass
+
+    async def resolver(_request: Request) -> None:
+        pass
+
+    async def allow_public_endpoint(request: Request, _context: object) -> None:
+        endpoint = request.scope.get("endpoint")
+        selected_endpoints.append(endpoint)
+        if not getattr(endpoint, "__public_probe__", False):
+            raise AuthenticationError("Authentication required")
+
+    app.add_dependency_request_guard(
+        allow_public_endpoint,
+        dependency=dependency,
+        resolver=resolver,
+    )
+    app.include_router(parent, prefix="/parent")
+
+    @child.get("/public")
+    async def public_endpoint() -> dict[str, bool]:
+        return {"ok": True}
+
+    public_endpoint.__public_probe__ = True  # ty: ignore[unresolved-attribute]
+    parent.include_router(child, prefix="/child")
+
+    response = TestClient(app, raise_server_exceptions=False).get("/parent/child/public")
+
+    assert response.status_code == 200
+    assert selected_endpoints == [public_endpoint]
+
+
+def test_dependency_guard_state_reaches_late_nested_api_route(app: Calango) -> None:
+    parent = APIRouter()
+    child = APIRouter()
+
+    async def dependency(request: Request) -> str | None:
+        return request.headers.get("authorization")
+
+    async def resolver(request: Request) -> str | None:
+        return request.headers.get("authorization")
+
+    async def store_context(request: Request, context: object) -> None:
+        request.scope["guard_context"] = context
+
+    app.add_dependency_request_guard(
+        store_context,
+        dependency=dependency,
+        resolver=resolver,
+    )
+    app.include_router(parent, prefix="/parent")
+
+    @child.get("/context")
+    async def context_endpoint(request: Request) -> dict[str, str | None]:
+        return {"context": request.scope.get("guard_context")}
+
+    parent.include_router(child, prefix="/child")
+
+    response = TestClient(app).get(
+        "/parent/child/context",
+        headers={"Authorization": "Bearer allowed"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"context": "Bearer allowed"}
+
+
 def test_include_router_does_not_mutate_router_reused_by_plain_fastapi(
     app: Calango,
 ) -> None:
@@ -536,6 +805,39 @@ def test_dependency_request_guard_uses_fastapi_dependency_and_mount_resolver(
         ("/mounted/", None),
         ("/mounted/", "Bearer allowed"),
     ]
+
+
+def test_dependency_request_guard_survives_public_override_clear(app: Calango) -> None:
+    async def token_dependency(request: Request) -> str | None:
+        return request.headers.get("authorization")
+
+    async def token_resolver(request: Request) -> str | None:
+        return request.headers.get("authorization")
+
+    async def require_token(_request: Request, token: object) -> None:
+        if token != "Bearer allowed":
+            raise AuthenticationError("Authentication required")
+
+    @app.get("/private")
+    async def private_route() -> dict[str, bool]:
+        return {"ok": True}
+
+    app.add_dependency_request_guard(
+        require_token,
+        dependency=token_dependency,
+        resolver=token_resolver,
+    )
+    app.dependency_overrides.clear()
+    client = TestClient(app, raise_server_exceptions=False)
+
+    assert client.get("/private").status_code == 401
+    assert (
+        client.get(
+            "/private",
+            headers={"Authorization": "Bearer allowed"},
+        ).status_code
+        == 200
+    )
 
 
 def test_private_mount_preserves_root_path_and_streaming(app: Calango) -> None:
