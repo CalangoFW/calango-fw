@@ -301,6 +301,7 @@ name = "calango-core"
 version = "0.1.0.dev0"
 source = { editable = "packages/calango-core" }
 dependencies = [
+    { name = "anyio" },
     { name = "asyncpg" },
     { name = "calango-plugin-base" },
     { name = "fastapi" },
@@ -319,6 +320,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiosqlite", marker = "extra == 'dev'", specifier = ">=0.20" },
+    { name = "anyio", specifier = ">=4.15.1" },
     { name = "asyncpg", specifier = ">=0.30" },
     { name = "calango-plugin-base", editable = "packages/calango-plugin-base" },
     { name = "fastapi", specifier = ">=0.141.1" },
@@ -344,6 +346,7 @@ dependencies = [
     { name = "fastapi-users", extra = ["sqlalchemy"] },
     { name = "limits" },
     { name = "pydantic-settings" },
+    { name = "pyjwt" },
     { name = "python-multipart" },
     { name = "redis" },
     { name = "slowapi" },
@@ -362,6 +365,7 @@ requires-dist = [
     { name = "fastapi-users", extras = ["sqlalchemy"], specifier = ">=13.0" },
     { name = "limits", specifier = ">=5.8" },
     { name = "pydantic-settings", specifier = ">=2.14.2" },
+    { name = "pyjwt", specifier = ">=2.15.1" },
     { name = "python-multipart", specifier = ">=0.0.31" },
     { name = "redis", specifier = ">=5.2" },
     { name = "slowapi", specifier = ">=0.1.9" },

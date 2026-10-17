@@ -10,6 +10,7 @@ dependencies = [
     "cryptography>=50.0.0",
     "fastapi>=0.141.1",
     "fastapi-users[sqlalchemy]>=13.0",
+    "pyjwt>=2.15.1",  # security floor: PYSEC-2026 advisories in <2.15
     "pydantic-settings>=2.14.2",
     "sqlalchemy[asyncio]>=2.0.36",
     "asyncpg>=0.30",
