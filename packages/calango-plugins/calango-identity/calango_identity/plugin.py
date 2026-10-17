@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import timedelta
 from importlib import import_module
 from importlib.resources import files
@@ -9,9 +10,14 @@ import redis.asyncio as redis
 from calango_plugin_base import PluginMigration
 from fastapi import FastAPI, Request, Response
 from pydantic_settings import BaseSettings
+from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 
-from calango_identity.dependencies import enforce_authentication
+from calango import Calango
+from calango_identity.dependencies import (
+    make_authentication_guard,
+    make_optional_current_user_resolver,
+)
 from calango_identity.rate_limit import make_limiter
 from calango_identity.refresh_tokens import RedisRefreshTokenStore, RefreshTokenStore
 from calango_identity.router import make_auth_router, make_fastapi_users
@@ -41,10 +47,19 @@ class IdentityPlugin:
         self,
         settings: IdentitySettings | None = None,
         refresh_store: RefreshTokenStore | None = None,
+        limiter: Limiter | None = None,
     ) -> None:
         self._settings = settings or IdentitySettings()
-        self._limiter = make_limiter(self._settings.REDIS_URL)
+        self._owned_limiter: Limiter | None = None
+        if limiter is None:
+            limiter = make_limiter(
+                self._settings.REDIS_URL,
+                self._settings.TRUSTED_PROXIES,
+            )
+            self._owned_limiter = limiter
+        self._limiter = limiter
         self._owned_redis_client: redis.Redis | None = None
+        self._owned_resources_closed = False
         if refresh_store is not None:
             self.refresh_store = refresh_store
         else:
@@ -58,43 +73,60 @@ class IdentityPlugin:
 
     def register(self, app: FastAPI) -> None:
         """Register auth routers, rate limiter, and exception handler."""
-        existing_routes = tuple(app.routes)
+        if not isinstance(app, Calango):
+            raise TypeError("IdentityPlugin requires a Calango application")
 
         # Rate limiting middleware
         app.state.limiter = self._limiter
         # slowapi's handler signature is broader than Starlette's expected type;
         # the mismatch is benign at runtime.
         app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # ty: ignore[invalid-argument-type]
-        if self._owned_redis_client is not None:
-            app.router.add_event_handler("shutdown", self._close_owned_redis_client)
 
-        # Auth router — uses calango-core get_db if available, else a no-op stub
-        try:
-            from calango.core.database import get_db
-        except ImportError:
-
-            async def get_db():  # type: ignore[misc]  # pragma: no cover
-                yield None
-
-        fastapi_users = make_fastapi_users(self._settings, get_db)
+        session_dependency = app.database.session
+        fastapi_users = make_fastapi_users(self._settings, session_dependency)
+        optional_current_user = fastapi_users.current_user(optional=True, active=True)
+        app.add_dependency_request_guard(
+            make_authentication_guard(optional_current_user),
+            dependency=optional_current_user,
+            resolver=make_optional_current_user_resolver(
+                self._settings,
+                session_dependency,
+            ),
+        )
         auth_router = make_auth_router(
             settings=self._settings,
-            get_db=get_db,
+            get_db=session_dependency,
             refresh_store=self.refresh_store,
             limiter=self._limiter,
             fastapi_users=fastapi_users,
         )
         app.include_router(auth_router)
-        enforce_authentication(
-            app,
-            fastapi_users.current_user(optional=True, active=True),
-            existing_routes,
-        )
 
-    async def _close_owned_redis_client(self) -> None:
-        """Close only the async Redis client constructed by this plugin."""
-        if self._owned_redis_client is not None:
-            await self._owned_redis_client.aclose()
+        @asynccontextmanager
+        async def owned_resource_lifespan(_app: Calango):
+            try:
+                yield
+            finally:
+                await self._close_owned_resources()
+
+        app.add_plugin_lifespan(owned_resource_lifespan)
+
+    async def _close_owned_resources(self) -> None:
+        """Close constructed async and sync backends at most once."""
+        if self._owned_resources_closed:
+            return
+        self._owned_resources_closed = True
+
+        try:
+            if self._owned_redis_client is not None:
+                await self._owned_redis_client.aclose()
+        finally:
+            if self._owned_limiter is not None:
+                storage = self._owned_limiter.limiter.storage
+                storage_client = getattr(storage, "storage", None)
+                close = getattr(storage_client, "close", None)
+                if callable(close):
+                    close()
 
     def import_models(self) -> None:
         """Register Identity models explicitly with canonical metadata."""

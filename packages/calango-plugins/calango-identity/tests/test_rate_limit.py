@@ -15,6 +15,7 @@ from slowapi.errors import RateLimitExceeded
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from calango import Calango
+from calango.core.database import DatabaseRuntime
 from tests.conftest import TEST_PRIVATE_KEY, TEST_PUBLIC_KEY
 
 
@@ -118,9 +119,7 @@ async def test_rate_limit_blocks_after_threshold():
 
 
 @pytest.fixture
-async def limited_login_app(
-    monkeypatch: pytest.MonkeyPatch,
-) -> AsyncIterator[Calango]:
+async def limited_login_app() -> AsyncIterator[Calango]:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -130,7 +129,6 @@ async def limited_login_app(
         async with session_factory() as session:
             yield session
 
-    monkeypatch.setattr("calango.core.database.get_db", get_db)
     settings = IdentitySettings(
         PRIVATE_KEY=TEST_PRIVATE_KEY,
         PUBLIC_KEY=TEST_PUBLIC_KEY,
@@ -139,6 +137,7 @@ async def limited_login_app(
         RATE_LIMIT_LOGIN_PER_HOUR_PER_EMAIL=2,
     )
     app = Calango()
+    app.database = DatabaseRuntime(app.settings, session_dependency=get_db)
     app.include_plugin(IdentityPlugin(settings=settings, refresh_store=InMemoryRefreshTokenStore()))
 
     yield app

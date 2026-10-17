@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 import pytest
 from calango_identity.plugin import IdentityPlugin
 from calango_identity.refresh_tokens import InMemoryRefreshTokenStore, RedisRefreshTokenStore
 from calango_identity.settings import IdentitySettings
 from calango_plugin_base import PluginBase, PluginMigration
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
+from calango import Calango
 from tests.conftest import TEST_PRIVATE_KEY, TEST_PUBLIC_KEY
 
 
@@ -58,7 +62,7 @@ def test_identity_plugin_context_md_contains_identity(settings):
 
 def test_identity_plugin_register_adds_auth_routes(settings):
     """IdentityPlugin.register() adds /auth routes to the app."""
-    app = FastAPI()
+    app = Calango()
     plugin = IdentityPlugin(settings=settings)
     plugin.register(app)
 
@@ -69,7 +73,7 @@ def test_identity_plugin_register_adds_auth_routes(settings):
 def test_identity_plugin_uses_injected_refresh_store_for_session_routes(settings):
     """An injected store backs the login, refresh, and logout routes."""
     refresh_store = InMemoryRefreshTokenStore()
-    app = FastAPI()
+    app = Calango()
 
     plugin = IdentityPlugin(settings=settings, refresh_store=refresh_store)
     plugin.register(app)
@@ -92,37 +96,112 @@ def test_identity_plugin_builds_redis_store_from_settings(monkeypatch, settings)
 
 class CloseTrackingRedis:
     def __init__(self) -> None:
-        self.closed = False
+        self.close_calls = 0
 
     async def aclose(self) -> None:
-        self.closed = True
+        self.close_calls += 1
 
 
-async def test_plugin_closes_plugin_owned_redis_client(monkeypatch, settings):
-    client = CloseTrackingRedis()
-    monkeypatch.setattr("calango_identity.plugin.redis.from_url", lambda *args, **kwargs: client)
-    app = FastAPI()
+class CloseTrackingSyncClient:
+    def __init__(self) -> None:
+        self.close_calls = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+
+class CloseTrackingLimiter:
+    def __init__(self, client: CloseTrackingSyncClient) -> None:
+        storage = type("Storage", (), {"storage": client})()
+        self.limiter = type("Backend", (), {"storage": storage})()
+
+    def limit(self, *_args, **_kwargs):
+        def decorator(func):
+            return func
+
+        return decorator
+
+
+def test_plugin_requires_calango_application(settings):
+    plugin = IdentityPlugin(settings=settings, refresh_store=InMemoryRefreshTokenStore())
+
+    with pytest.raises(TypeError, match="Calango"):
+        plugin.register(FastAPI())
+
+
+def test_plugin_passes_trusted_proxies_to_limiter(monkeypatch):
+    calls = []
+    sync_client = CloseTrackingSyncClient()
+    limiter = CloseTrackingLimiter(sync_client)
+
+    def tracking_make_limiter(*args):
+        calls.append(args)
+        return limiter
+
+    monkeypatch.setattr("calango_identity.plugin.make_limiter", tracking_make_limiter)
+    settings = IdentitySettings(
+        PRIVATE_KEY=TEST_PRIVATE_KEY,
+        PUBLIC_KEY=TEST_PUBLIC_KEY,
+        REDIS_URL="memory://",
+        TRUSTED_PROXIES=("10.0.0.0/8", "192.0.2.8"),
+    )
+
+    IdentityPlugin(settings=settings, refresh_store=InMemoryRefreshTokenStore())
+
+    assert calls == [("memory://", ("10.0.0.0/8", "192.0.2.8"))]
+
+
+def test_plugin_lifespan_closes_owned_async_and_sync_resources_once(
+    monkeypatch,
+    settings,
+):
+    async_client = CloseTrackingRedis()
+    sync_client = CloseTrackingSyncClient()
+    limiter = CloseTrackingLimiter(sync_client)
+    user_events = []
+    monkeypatch.setattr(
+        "calango_identity.plugin.redis.from_url",
+        lambda *args, **kwargs: async_client,
+    )
+    monkeypatch.setattr("calango_identity.plugin.make_limiter", lambda *args: limiter)
+
+    @asynccontextmanager
+    async def user_lifespan(_app):
+        user_events.append("start")
+        yield
+        user_events.append("stop")
+
+    app = Calango(lifespan=user_lifespan)
     plugin = IdentityPlugin(settings=settings)
-    plugin.register(app)
+    app.include_plugin(plugin)
 
-    async with app.router.lifespan_context(app):
+    with TestClient(app):
         pass
 
-    assert client.closed is True
+    assert user_events == ["start", "stop"]
+    assert async_client.close_calls == 1
+    assert sync_client.close_calls == 1
 
 
-async def test_plugin_does_not_close_injected_redis_store_client(settings):
-    client = CloseTrackingRedis()
+def test_plugin_does_not_close_injected_resources(settings):
+    async_client = CloseTrackingRedis()
+    sync_client = CloseTrackingSyncClient()
+    limiter = CloseTrackingLimiter(sync_client)
     # This test double intentionally implements only the lifecycle method under test.
-    injected_store = RedisRefreshTokenStore(client)  # ty: ignore[invalid-argument-type]
-    app = FastAPI()
-    plugin = IdentityPlugin(settings=settings, refresh_store=injected_store)
-    plugin.register(app)
+    injected_store = RedisRefreshTokenStore(async_client)  # ty: ignore[invalid-argument-type]
+    app = Calango()
+    plugin = IdentityPlugin(
+        settings=settings,
+        refresh_store=injected_store,
+        limiter=limiter,  # ty: ignore[invalid-argument-type]
+    )
+    app.include_plugin(plugin)
 
-    async with app.router.lifespan_context(app):
+    with TestClient(app):
         pass
 
-    assert client.closed is False
+    assert async_client.close_calls == 0
+    assert sync_client.close_calls == 0
 
 
 def test_package_exports_redis_refresh_store_interfaces():

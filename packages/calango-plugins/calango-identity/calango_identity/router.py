@@ -5,6 +5,7 @@ from collections.abc import Callable
 from json import JSONDecodeError
 
 from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi.routing import APIRoute
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi_users import FastAPIUsers, exceptions
 from pydantic import ValidationError
@@ -12,6 +13,7 @@ from slowapi import Limiter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from calango.exceptions import AuthenticationError, ServiceUnavailableError
+from calango_identity.dependencies import identity_public
 from calango_identity.manager import UserManager, make_get_user_manager
 from calango_identity.models import User
 from calango_identity.rate_limit import capture_login_email, get_email_key
@@ -40,6 +42,14 @@ _REFRESH_TOKEN_OPENAPI_BODY = {
         },
     }
 }
+
+
+def _mark_identity_public_routes(router: APIRouter) -> APIRouter:
+    """Mark every direct route in an Identity-owned anonymous router."""
+    for route in router.routes:
+        if isinstance(route, APIRoute):
+            identity_public(route.endpoint)
+    return router
 
 
 def _translate_refresh_error(
@@ -98,6 +108,7 @@ def make_auth_router(
     router = APIRouter()
 
     @router.post("/auth/login", response_model=TokenResponse, tags=["auth"])
+    @identity_public
     @limiter.limit(f"{settings.RATE_LIMIT_LOGIN_PER_MINUTE}/minute")
     @limiter.limit(
         f"{settings.RATE_LIMIT_LOGIN_PER_HOUR_PER_EMAIL}/hour",
@@ -132,6 +143,7 @@ def make_auth_router(
         tags=["auth"],
         openapi_extra=_REFRESH_TOKEN_OPENAPI_BODY,
     )
+    @identity_public
     async def refresh(
         request: Request,
         user_manager: UserManager = Depends(get_user_manager),  # noqa: B008
@@ -161,6 +173,7 @@ def make_auth_router(
         tags=["auth"],
         openapi_extra=_REFRESH_TOKEN_OPENAPI_BODY,
     )
+    @identity_public
     async def logout(request: Request) -> None:
         token = await _parse_refresh_token(request)
         try:
@@ -169,12 +182,12 @@ def make_auth_router(
             raise _translate_refresh_error(exc) from exc
 
     router.include_router(
-        fu.get_register_router(UserRead, UserCreate),
+        _mark_identity_public_routes(fu.get_register_router(UserRead, UserCreate)),
         prefix="/auth",
         tags=["auth"],
     )
     router.include_router(
-        fu.get_reset_password_router(),
+        _mark_identity_public_routes(fu.get_reset_password_router()),
         prefix="/auth",
         tags=["auth"],
     )
