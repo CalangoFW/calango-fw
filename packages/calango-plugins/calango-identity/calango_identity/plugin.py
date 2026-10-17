@@ -15,6 +15,8 @@ from slowapi.errors import RateLimitExceeded
 
 from calango import Calango
 from calango_identity.dependencies import (
+    get_current_user,
+    install_user_resolver,
     make_authentication_guard,
     make_optional_current_user_resolver,
 )
@@ -84,14 +86,12 @@ class IdentityPlugin:
 
         session_dependency = app.database.session
         fastapi_users = make_fastapi_users(self._settings, session_dependency)
-        optional_current_user = fastapi_users.current_user(optional=True, active=True)
+        resolver = make_optional_current_user_resolver(self._settings, session_dependency)
+        install_user_resolver(app, resolver)
         app.add_dependency_request_guard(
-            make_authentication_guard(optional_current_user),
-            dependency=optional_current_user,
-            resolver=make_optional_current_user_resolver(
-                self._settings,
-                session_dependency,
-            ),
+            make_authentication_guard(),
+            dependency=get_current_user,
+            resolver=resolver,
         )
         auth_router = make_auth_router(
             settings=self._settings,

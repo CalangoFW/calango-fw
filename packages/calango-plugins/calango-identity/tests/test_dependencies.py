@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -73,9 +74,6 @@ def test_non_public_function_has_no_marker():
 async def test_authentication_guard_allows_explicit_identity_public_endpoint():
     from calango_identity.dependencies import make_authentication_guard
 
-    async def optional_current_user():
-        return None
-
     async def identity_endpoint():
         pass
 
@@ -93,16 +91,13 @@ async def test_authentication_guard_allows_explicit_identity_public_endpoint():
         }
     )
 
-    guard = make_authentication_guard(optional_current_user)
+    guard = make_authentication_guard()
 
     await guard(request, None)
 
 
 async def test_authentication_guard_rejects_anonymous_private_endpoint():
     from calango_identity.dependencies import make_authentication_guard
-
-    async def optional_current_user():
-        return None
 
     async def private_endpoint():
         pass
@@ -120,7 +115,7 @@ async def test_authentication_guard_rejects_anonymous_private_endpoint():
         }
     )
 
-    guard = make_authentication_guard(optional_current_user)
+    guard = make_authentication_guard()
 
     with pytest.raises(AuthenticationError):
         await guard(request, None)
@@ -223,6 +218,24 @@ async def identity_app() -> AsyncIterator[tuple[Calango, async_sessionmaker[Asyn
     @public
     async def open_endpoint():
         return {"open": True}
+
+    @app.get("/feed")
+    @public
+    async def feed(user: User | None = Depends(get_current_user)):  # noqa: B008
+        return {"email": None if user is None else user.email}
+
+    @app.get("/open-permission")
+    @public
+    async def open_permission(user: User = require_permission("reports:view")):  # noqa: B008
+        return {"user_id": str(user.id)}
+
+    account_app = FastAPI()
+
+    @account_app.get("/me")
+    async def mounted_me(user: User = Depends(get_current_user)):  # noqa: B008
+        return {"email": user.email}
+
+    app.mount("/mounted-account", account_app)
 
     application_router = APIRouter()
     late_parent = APIRouter()
@@ -454,6 +467,96 @@ async def test_identity_guard_survives_public_dependency_override_clear(identity
 
     assert anonymous.status_code == 401
     assert authenticated.status_code == 200
+
+
+async def test_public_route_receives_none_for_anonymous_user(identity_app):
+    app, _ = identity_app
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/feed")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"email": None}
+
+
+async def test_public_route_receives_authenticated_user(identity_app):
+    app, _ = identity_app
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        headers = await _register_and_login(client, "feed@example.com")
+        response = await client.get("/feed", headers=headers)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"email": "feed@example.com"}
+
+
+async def test_public_permission_route_rejects_anonymous_user(identity_app):
+    app, _ = identity_app
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/open-permission")
+
+    assert response.status_code == 401
+    assert response.json()["error"] == "authentication_error"
+
+
+async def test_mounted_application_receives_authenticated_user(identity_app):
+    app, _ = identity_app
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        headers = await _register_and_login(client, "mounted-account@example.com")
+        response = await client.get("/mounted-account/me", headers=headers)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"email": "mounted-account@example.com"}
+
+
+async def test_overriding_get_current_user_authenticates_private_routes(identity_app):
+    app, _ = identity_app
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
+        email="override@example.com"
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        overridden = await client.get("/late-parent/child/current-user")
+        app.dependency_overrides.clear()
+        restored = await client.get("/late-parent/child/current-user")
+
+    assert overridden.status_code == 200, overridden.text
+    assert overridden.json() == {"email": "override@example.com"}
+    assert restored.status_code == 401
+
+
+async def test_user_resolution_uses_overridden_session_dependency():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(User.metadata.create_all)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def test_session():
+        async with session_factory() as session:
+            yield session
+
+    app = Calango()
+    private_child = FastAPI()
+
+    @private_child.get("/")
+    async def private_child_root():
+        return {"private": "mount"}
+
+    app.mount("/private-mount", private_child)
+    settings = IdentitySettings(
+        PRIVATE_KEY=TEST_PRIVATE_KEY,
+        PUBLIC_KEY=TEST_PUBLIC_KEY,
+        REDIS_URL="memory://",
+    )
+    app.include_plugin(IdentityPlugin(settings=settings, refresh_store=InMemoryRefreshTokenStore()))
+    app.dependency_overrides[app.database.session] = test_session
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        headers = await _register_and_login(client, "override-session@example.com")
+        mounted = await client.get("/private-mount/", headers=headers)
+        api_route = await client.get("/users/me", headers=headers)
+    await engine.dispose()
+
+    assert mounted.status_code == 200, mounted.text
+    assert api_route.status_code == 200, api_route.text
 
 
 @pytest.mark.parametrize("path", ["/auth/refresh", "/auth/logout"])

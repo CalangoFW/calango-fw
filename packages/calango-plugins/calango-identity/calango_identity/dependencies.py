@@ -4,7 +4,7 @@ from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import aclosing
 from typing import Any
 
-from fastapi import Depends, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.security import HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +19,7 @@ SessionDependency = Callable[[], AsyncGenerator[AsyncSession, None]]
 UserResolver = Callable[[Request], Awaitable[User | None]]
 
 _CURRENT_USER_SCOPE_KEY = "calango.identity.current_user"
+_USER_RESOLVER_STATE = "calango_identity_user_resolver"
 _bearer = HTTPBearer(auto_error=False)
 
 
@@ -41,23 +42,19 @@ def identity_public(func: Callable) -> Callable:
     return func
 
 
-def make_authentication_guard(
-    optional_current_user: Callable[..., Any],
-) -> AuthenticationGuard:
+def _is_public_endpoint(endpoint: object) -> bool:
+    return bool(
+        getattr(endpoint, "__calango_public__", False)
+        or getattr(endpoint, "__calango_identity_public__", False)
+    )
+
+
+def make_authentication_guard() -> AuthenticationGuard:
     """Build Identity's endpoint-aware private-by-default request guard."""
-    if not callable(optional_current_user):
-        raise TypeError("optional_current_user must be callable")
 
     async def authentication_guard(request: Request, user: User | None) -> None:
         request.scope[_CURRENT_USER_SCOPE_KEY] = user
-        endpoint = request.scope.get("endpoint")
-        if getattr(endpoint, "__calango_public__", False) or getattr(
-            endpoint,
-            "__calango_identity_public__",
-            False,
-        ):
-            return
-        if user is None:
+        if user is None and not _is_public_endpoint(request.scope.get("endpoint")):
             raise AuthenticationError("Authentication required")
 
     return authentication_guard
@@ -67,7 +64,7 @@ def make_optional_current_user_resolver(
     settings: IdentitySettings,
     session_dependency: SessionDependency,
 ) -> UserResolver:
-    """Resolve the same optional active user for Starlette routes and mounts."""
+    """Resolve the optional active bearer-token user for every HTTP boundary."""
     get_user_manager = make_get_user_manager(settings)
     strategy = make_jwt_strategy(settings)
 
@@ -76,7 +73,12 @@ def make_optional_current_user_resolver(
         if credentials is None:
             return None
 
-        async with aclosing(session_dependency()) as sessions:
+        # Honour test/application overrides exactly as FastAPI DI would.
+        open_sessions = request.app.dependency_overrides.get(
+            session_dependency,
+            session_dependency,
+        )
+        async with aclosing(open_sessions()) as sessions:
             async for session in sessions:
                 async with aclosing(get_user_manager(session)) as managers:
                     manager = await anext(managers)
@@ -89,10 +91,32 @@ def make_optional_current_user_resolver(
     return resolve
 
 
-async def get_current_user(request: Request) -> User:
-    """Return the user resolved once by Identity's application guard."""
-    user = request.scope.get(_CURRENT_USER_SCOPE_KEY)
-    if user is None:
+def install_user_resolver(app: FastAPI, resolver: UserResolver) -> None:
+    """Expose the plugin's resolver to Identity's module-level dependencies."""
+    setattr(app.state, _USER_RESOLVER_STATE, resolver)
+
+
+async def get_optional_current_user(request: Request) -> User | None:
+    """Return the active bearer-token user, or ``None`` for anonymous requests."""
+    if _CURRENT_USER_SCOPE_KEY in request.scope:
+        return request.scope[_CURRENT_USER_SCOPE_KEY]
+    resolver = getattr(request.app.state, _USER_RESOLVER_STATE, None)
+    if resolver is None:
+        raise RuntimeError("IdentityPlugin is not installed on this application")
+    return await resolver(request)
+
+
+async def get_current_user(
+    request: Request,
+    user: User | None = Depends(get_optional_current_user),  # noqa: B008
+) -> User | None:
+    """Return the authenticated user.
+
+    Private endpoints always receive a user. ``@public`` endpoints receive the
+    user when the request is authenticated and ``None`` when it is anonymous.
+    Overriding this dependency (e.g. in tests) also satisfies the guard.
+    """
+    if user is None and not _is_public_endpoint(request.scope.get("endpoint")):
         raise AuthenticationError("Authentication required")
     return user
 
@@ -109,8 +133,10 @@ def require_permission(permission_code: str) -> Any:
     """
 
     async def _check_permission(
-        user: User = Depends(get_current_user),  # noqa: B008
+        user: User | None = Depends(get_current_user),  # noqa: B008
     ) -> User:
+        if user is None:
+            raise AuthenticationError("Authentication required")
         user_perms = {perm.code for role in user.roles for perm in role.permissions}
         if permission_code not in user_perms:
             raise AuthorizationError(f"Permission '{permission_code}' required")
