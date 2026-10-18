@@ -33,3 +33,6 @@ addopts = "-v --tb=short --import-mode=importlib"
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+markers = [
+    "integration: needs real PostgreSQL/Redis (Docker or CALANGO_TEST_*_URL); skipped otherwise",
+]

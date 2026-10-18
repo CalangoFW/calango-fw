@@ -1,14 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import os
-import shutil
-import subprocess
-import time
-from collections.abc import AsyncGenerator
 from importlib.metadata import entry_points
-from pathlib import Path
-from uuid import uuid4
 
 import pytest
 from calango_identity.plugin import IdentityPlugin
@@ -19,7 +12,7 @@ from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import create_async_engine
 from tests.conftest import TEST_PRIVATE_KEY, TEST_PUBLIC_KEY
 
-from calango_cli.migrations import MigrationResources, version_locations
+from calango_cli.migrations import version_locations
 
 IDENTITY_TABLES = {
     "identity_permissions",
@@ -28,13 +21,7 @@ IDENTITY_TABLES = {
     "identity_user_roles",
     "identity_users",
 }
-POSTGRES_URL_ENV = "CALANGO_TEST_POSTGRES_URL"
-
-
-@pytest.fixture
-def migration_resources():
-    with MigrationResources() as resources:
-        yield resources
+pytestmark = pytest.mark.integration
 
 
 def test_identity_plugin_entry_point_is_installed():
@@ -48,80 +35,6 @@ def test_identity_plugin_entry_point_is_installed():
     assert matches[0].load() is IdentityPlugin
 
 
-def _docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["docker", *args],
-        check=check,
-        capture_output=True,
-        text=True,
-    )
-
-
-def _docker_is_available() -> bool:
-    if shutil.which("docker") is None:
-        return False
-    return _docker("info", check=False).returncode == 0
-
-
-@pytest.fixture
-async def postgres_url() -> AsyncGenerator[str, None]:
-    configured_url = os.getenv(POSTGRES_URL_ENV)
-    if configured_url:
-        yield configured_url
-        return
-
-    if not _docker_is_available():
-        pytest.skip(f"set {POSTGRES_URL_ENV} or provide a reachable Docker daemon for PostgreSQL")
-
-    name = f"calango-migrations-{uuid4().hex}"
-    container_id = _docker(
-        "run",
-        "--detach",
-        "--rm",
-        "--name",
-        name,
-        "--publish",
-        "127.0.0.1::5432",
-        "--env",
-        "POSTGRES_USER=calango",
-        "--env",
-        "POSTGRES_PASSWORD=calango",
-        "--env",
-        "POSTGRES_DB=calango_test",
-        "--health-cmd",
-        "pg_isready -U calango -d calango_test",
-        "--health-interval",
-        "250ms",
-        "--health-timeout",
-        "2s",
-        "--health-retries",
-        "40",
-        "postgres:16-alpine",
-    ).stdout.strip()
-    try:
-        deadline = time.monotonic() + 20
-        while time.monotonic() < deadline:
-            health = _docker(
-                "inspect",
-                "--format",
-                "{{.State.Health.Status}}",
-                container_id,
-                check=False,
-            ).stdout.strip()
-            log_result = _docker("logs", container_id, check=False)
-            logs = log_result.stdout + log_result.stderr
-            if health == "healthy" and logs.count("ready to accept connections") >= 2:
-                break
-            await asyncio.sleep(0.25)
-        else:
-            pytest.fail(f"temporary PostgreSQL did not become healthy: {logs[-2000:]}")
-
-        port = _docker("port", container_id, "5432/tcp").stdout.strip().rsplit(":", 1)[1]
-        yield f"postgresql+asyncpg://calango:calango@127.0.0.1:{port}/calango_test"
-    finally:
-        _docker("rm", "--force", container_id, check=False)
-
-
 async def _table_names(url: str) -> set[str]:
     engine = create_async_engine(url)
     try:
@@ -131,35 +44,17 @@ async def _table_names(url: str) -> set[str]:
         await engine.dispose()
 
 
-def _run_alembic(
-    url: str,
-    command_name: str,
-    revision: str,
-    versions: Path | tuple[Path, ...],
-) -> None:
-    from alembic import command
-    from alembic.config import Config
-
-    config = Config()
-    config.set_main_option("script_location", str(Path(__file__).parents[1] / "alembic"))
-    locations = (versions,) if isinstance(versions, Path) else versions
-    config.set_main_option("version_locations", os.pathsep.join(map(str, locations)))
-    config.set_main_option("path_separator", "os")
-    config.set_main_option("sqlalchemy.url", url)
-    getattr(command, command_name)(config, revision)
-
-
-async def test_identity_upgrade_and_downgrade(postgres_url, migration_resources):
+async def test_identity_upgrade_and_downgrade(postgres_url, migration_resources, run_alembic):
     plugin = IdentityPlugin(
         settings=IdentitySettings(PRIVATE_KEY=TEST_PRIVATE_KEY, PUBLIC_KEY=TEST_PUBLIC_KEY),
         refresh_store=InMemoryRefreshTokenStore(),
     )
     versions = version_locations(plugin.migrations(), resources=migration_resources)[0]
 
-    await asyncio.to_thread(_run_alembic, postgres_url, "upgrade", "heads", versions)
+    await asyncio.to_thread(run_alembic, postgres_url, "upgrade", "heads", versions)
     assert await _table_names(postgres_url) >= IDENTITY_TABLES
 
-    await asyncio.to_thread(_run_alembic, postgres_url, "downgrade", "base", versions)
+    await asyncio.to_thread(run_alembic, postgres_url, "downgrade", "base", versions)
     assert not (await _table_names(postgres_url) & IDENTITY_TABLES)
 
 
@@ -167,6 +62,7 @@ async def test_plugin_dependency_executes_after_required_plugin(
     postgres_url,
     tmp_path,
     migration_resources,
+    run_alembic,
 ):
     base_versions = tmp_path / "base_versions"
     dependent_versions = tmp_path / "dependent_versions"
@@ -250,7 +146,7 @@ async def test_plugin_dependency_executes_after_required_plugin(
     )
     locations = version_locations(items, resources=migration_resources)
 
-    await asyncio.to_thread(_run_alembic, postgres_url, "upgrade", "heads", locations)
+    await asyncio.to_thread(run_alembic, postgres_url, "upgrade", "heads", locations)
     engine = create_async_engine(postgres_url)
     try:
         async with engine.connect() as connection:
@@ -268,21 +164,21 @@ async def test_plugin_dependency_executes_after_required_plugin(
     assert "independent_marker" in await _table_names(postgres_url)
 
     await asyncio.to_thread(
-        _run_alembic,
+        run_alembic,
         postgres_url,
         "downgrade",
         "dependent_0002@-1",
         locations,
     )
     await asyncio.to_thread(
-        _run_alembic,
+        run_alembic,
         postgres_url,
         "downgrade",
         "aaa_dependent_0001@required_0001",
         locations,
     )
     await asyncio.to_thread(
-        _run_alembic,
+        run_alembic,
         postgres_url,
         "downgrade",
         "independent_0001@-1",
@@ -304,13 +200,14 @@ async def test_plugin_dependency_executes_after_required_plugin(
         await engine.dispose()
     assert labels == ("base",)
 
-    await asyncio.to_thread(_run_alembic, postgres_url, "downgrade", "base", locations)
+    await asyncio.to_thread(run_alembic, postgres_url, "downgrade", "base", locations)
 
 
 async def test_redundant_plugin_dependency_rolls_back_only_dependent(
     postgres_url,
     tmp_path,
     migration_resources,
+    run_alembic,
 ):
     versions_by_name = {name: tmp_path / f"{name}_versions" for name in ("a", "b", "c")}
     for location in versions_by_name.values():
@@ -353,7 +250,7 @@ async def test_redundant_plugin_dependency_rolls_back_only_dependent(
         resources=migration_resources,
     )
 
-    await asyncio.to_thread(_run_alembic, postgres_url, "upgrade", "heads", locations)
+    await asyncio.to_thread(run_alembic, postgres_url, "upgrade", "heads", locations)
     engine = create_async_engine(postgres_url)
     try:
         async with engine.connect() as connection:
@@ -368,7 +265,7 @@ async def test_redundant_plugin_dependency_rolls_back_only_dependent(
         await engine.dispose()
     assert labels == ("a", "b", "c")
 
-    await asyncio.to_thread(_run_alembic, postgres_url, "downgrade", "c_0001@-1", locations)
+    await asyncio.to_thread(run_alembic, postgres_url, "downgrade", "c_0001@-1", locations)
     engine = create_async_engine(postgres_url)
     try:
         async with engine.connect() as connection:
@@ -383,4 +280,4 @@ async def test_redundant_plugin_dependency_rolls_back_only_dependent(
         await engine.dispose()
     assert labels == ("a", "b")
 
-    await asyncio.to_thread(_run_alembic, postgres_url, "downgrade", "base", locations)
+    await asyncio.to_thread(run_alembic, postgres_url, "downgrade", "base", locations)

@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-import asyncio
-import shutil
-import subprocess
-import time
 from collections.abc import AsyncGenerator
-from uuid import uuid4
 
 import pytest
 from calango_identity.models import Base
@@ -18,75 +13,16 @@ from tests.conftest import TEST_PRIVATE_KEY, TEST_PUBLIC_KEY
 from calango import Calango
 from calango.core.database import DatabaseRuntime
 
+pytestmark = pytest.mark.integration
+
 CREDENTIALS = {"username": "redis-outage@example.com", "password": "SecurePassword123!"}
-
-
-def _docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["docker", *args],
-        check=check,
-        capture_output=True,
-        text=True,
-    )
-
-
-def _docker_is_available() -> bool:
-    if shutil.which("docker") is None:
-        return False
-    return _docker("info", check=False).returncode == 0
-
-
-@pytest.fixture
-async def redis_container() -> AsyncGenerator[tuple[str, str], None]:
-    """Yield a disposable Redis the test can stop; a shared server cannot be."""
-    if not _docker_is_available():
-        pytest.skip("provide a reachable Docker daemon to run the Redis outage test")
-
-    container_id = _docker(
-        "run",
-        "--detach",
-        "--rm",
-        "--name",
-        f"calango-redis-outage-{uuid4().hex}",
-        "--publish",
-        "127.0.0.1::6379",
-        "--health-cmd",
-        "redis-cli ping",
-        "--health-interval",
-        "250ms",
-        "--health-timeout",
-        "2s",
-        "--health-retries",
-        "40",
-        "redis:7-alpine",
-    ).stdout.strip()
-    try:
-        deadline = time.monotonic() + 20
-        while time.monotonic() < deadline:
-            health = _docker(
-                "inspect",
-                "--format",
-                "{{.State.Health.Status}}",
-                container_id,
-                check=False,
-            ).stdout.strip()
-            if health == "healthy":
-                break
-            await asyncio.sleep(0.25)
-        else:
-            pytest.fail("temporary Redis did not become healthy")
-
-        port = _docker("port", container_id, "6379/tcp").stdout.strip().rsplit(":", 1)[1]
-        yield container_id, f"127.0.0.1:{port}"
-    finally:
-        _docker("rm", "--force", container_id, check=False)
 
 
 @pytest.fixture
 async def redis_identity_client(
-    redis_container: tuple[str, str],
+    disposable_redis,
 ) -> AsyncGenerator[AsyncClient, None]:
-    _, redis_address = redis_container
+    redis_address = disposable_redis.address
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -115,10 +51,10 @@ async def redis_identity_client(
 
 
 async def test_redis_outage_returns_uniform_503_from_every_session_endpoint(
-    redis_container: tuple[str, str],
+    disposable_redis,
     redis_identity_client: AsyncClient,
 ):
-    container_id, redis_address = redis_container
+    redis_address = disposable_redis.address
     client = redis_identity_client
     registered = await client.post(
         "/auth/register",
@@ -129,7 +65,7 @@ async def test_redis_outage_returns_uniform_503_from_every_session_endpoint(
     assert login.status_code == 200, login.text
     refresh_token = login.json()["refresh_token"]
 
-    _docker("stop", "--time", "0", container_id)
+    disposable_redis.stop()
 
     responses = {
         "login": await client.post("/auth/login", data=CREDENTIALS),
