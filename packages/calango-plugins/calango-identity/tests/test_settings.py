@@ -173,3 +173,26 @@ def test_settings_rejects_trusted_proxy_cidr_with_host_bits(valid_keys):
     """A typo in a proxy CIDR must not silently broaden the trusted network."""
     with pytest.raises(ValidationError):
         IdentitySettings(**valid_keys, TRUSTED_PROXIES=("10.42.7.9/8",))
+
+
+def test_settings_read_identity_values_from_shared_dotenv(tmp_path, monkeypatch):
+    for name in ("IDENTITY__PRIVATE_KEY", "IDENTITY__PUBLIC_KEY", "IDENTITY__REDIS_URL"):
+        monkeypatch.delenv(name, raising=False)
+
+    def escaped(pem: str) -> str:
+        return pem.replace("\n", "\\n")
+
+    (tmp_path / ".env").write_text(
+        "CALANGO_ENV=development\n"
+        "SECURITY__SECRET_KEY=shared-application-secret\n"
+        f'IDENTITY__PRIVATE_KEY="{escaped(TEST_PRIVATE_KEY)}"\n'
+        f'IDENTITY__PUBLIC_KEY="{escaped(TEST_PUBLIC_KEY)}"\n'
+        "IDENTITY__REDIS_URL=redis://cache:6379/2\n"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    settings = IdentitySettings()
+
+    assert settings.PRIVATE_KEY.get_secret_value() == TEST_PRIVATE_KEY
+    assert settings.PUBLIC_KEY.get_secret_value() == TEST_PUBLIC_KEY
+    assert settings.REDIS_URL == "redis://cache:6379/2"

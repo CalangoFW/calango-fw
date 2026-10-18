@@ -36,7 +36,13 @@ class IdentitySettings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     TRUSTED_PROXIES: tuple[str, ...] = ()
 
-    model_config = SettingsConfigDict(env_prefix="IDENTITY__", hide_input_in_errors=True)
+    # Shares the application's .env with CalangoSettings; other variables are ignored.
+    model_config = SettingsConfigDict(
+        env_prefix="IDENTITY__",
+        env_file=".env",
+        extra="ignore",
+        hide_input_in_errors=True,
+    )
 
     def __init__(self, **values: Any) -> None:
         """Accept string-backed environment values while storing keys as secrets."""
