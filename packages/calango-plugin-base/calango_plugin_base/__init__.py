@@ -1,9 +1,20 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from importlib.resources.abc import Traversable
 from typing import Protocol, runtime_checkable
 
 from fastapi import FastAPI
 from pydantic_settings import BaseSettings
+
+
+@dataclass(frozen=True)
+class PluginMigration:
+    """A wheel-safe Alembic migration contribution from a plugin."""
+
+    name: str
+    versions: Traversable
+    depends_on: tuple[str, ...]
 
 
 @runtime_checkable
@@ -19,8 +30,11 @@ class PluginBase(Protocol):
             def register(self, app: FastAPI) -> None:
                 app.include_router(my_router)
 
-            def migrations(self) -> list[str]:
-                return ["my_plugin.migrations"]
+            def import_models(self) -> None:
+                import my_plugin.models
+
+            def migrations(self) -> tuple[PluginMigration, ...]:
+                return ()
 
             def settings(self) -> type[BaseSettings]:
                 return MyPluginSettings
@@ -40,8 +54,12 @@ class PluginBase(Protocol):
         """Register routers, middleware, exception handlers, lifecycle hooks."""
         ...
 
-    def migrations(self) -> list[str]:
-        """Return Alembic migration module paths contributed by this plugin."""
+    def import_models(self) -> None:
+        """Import every plugin model into the canonical Base.metadata."""
+        ...
+
+    def migrations(self) -> tuple[PluginMigration, ...]:
+        """Return typed Alembic migration contributions from this plugin."""
         ...
 
     def settings(self) -> type[BaseSettings]:
@@ -57,4 +75,4 @@ class PluginBase(Protocol):
         ...
 
 
-__all__ = ["PluginBase"]
+__all__ = ["PluginBase", "PluginMigration"]

@@ -537,7 +537,8 @@ async def request_refund(context: AgentContext, order_id: str, reason: str):
 ### Posture: secure by default, explicit to override
 
 ```python
-# All endpoints require auth by default (identity plugin active)
+# All HTTP endpoints and mounts require auth by default (identity plugin active).
+# WebSocket endpoints are not covered — they must authenticate themselves.
 @router.get("/orders")
 async def list_orders(current_user: User = Depends(get_current_user)):
     ...
@@ -848,16 +849,18 @@ calango setup:agile [--tool=linear|jira|github]
 - [x] `calango-core`: `BaseRepository[T: Base]` + `BaseService` (SQLAlchemy 2 async)
 - [x] `calango-core`: canonical `calango.db.Base` (id + timestamps) + `import_models()` discovery
 - [x] `calango-cli`: `calango db` — revision (autogenerate), migrate, rollback, seed
+- [x] `calango-core`: owned database lifecycle (`app.database`), plugin lifespans, request guards covering routes and mounts
+- [x] `calango-identity`: JWT RS256, RBAC, rate limits, refresh-token rotation, `IdentityEvents`, shipped migration
+- [x] `calango-cli`: `calango new --identity`, verified end to end against PostgreSQL and Redis
 
 ## What to implement next (in this order)
 
-1. `calango-identity` — finish refresh-token rotation (core auth/RBAC/rate-limit already done)
-2. `calango-multitenancy` plugin — Postgres RLS
-3. `calango-payments` plugin — Stripe + MercadoPago/Pix
-4. `calango-agents` plugin — Agno + AgentRouter + Tool Registry + MCP Server
-5. `calango db suggest-indexes` — missing index detection (deferred from Phase 5)
-6. `calango context` — auto-regenerate CLAUDE.md
-7. Remaining `CL0xx` Opengrep rules (CL001–CL032) with fixtures
+1. `calango-multitenancy` plugin — Postgres RLS
+2. `calango-payments` plugin — Stripe + MercadoPago/Pix
+3. `calango-agents` plugin — Agno + AgentRouter + Tool Registry + MCP Server
+4. `calango db suggest-indexes` — missing index detection (deferred from Phase 5)
+5. `calango context` — auto-regenerate CLAUDE.md
+6. Remaining `CL0xx` Opengrep rules (CL001–CL032) with fixtures
 
 ---
 

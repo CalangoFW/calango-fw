@@ -22,12 +22,14 @@ _TEMPLATE_FILES = [
     ("app/core/config.py.jinja", "app/core/config.py"),
     ("app/contexts/.gitkeep.jinja", "app/contexts/.gitkeep"),
     ("app/routers/.gitkeep.jinja", "app/routers/.gitkeep"),
+    ("app/plugins/__init__.py.jinja", "app/plugins/__init__.py"),
     ("security/opengrep/calango.yml.jinja", "security/opengrep/calango.yml"),
     ("app/seeds/__init__.py.jinja", "app/seeds/__init__.py"),
     ("app/seeds/001_example.py.jinja", "app/seeds/001_example.py"),
     ("tests/__init__.py.jinja", "tests/__init__.py"),
     ("tests/conftest.py.jinja", "tests/conftest.py"),
     ("alembic/env.py.jinja", "alembic/env.py"),
+    ("alembic/script.py.mako.jinja", "alembic/script.py.mako"),
     ("alembic/versions/.gitkeep.jinja", "alembic/versions/.gitkeep"),
     ("alembic.ini.jinja", "alembic.ini"),
     ("Dockerfile.jinja", "Dockerfile"),
@@ -44,8 +46,19 @@ _TEMPLATE_FILES = [
     ("SECURITY.md.jinja", "SECURITY.md"),
 ]
 
+_IDENTITY_TEMPLATE_FILES = [
+    ("app/plugins/identity.py.jinja", "app/plugins/identity.py"),
+]
+
 _SUPPORTED_DB = {"postgres"}
 _SUPPORTED_CI = {"github"}
+
+
+def _template_files(context: dict) -> list[tuple[str, str]]:
+    """Return the templates for this project, including selected plugins."""
+    if context["identity"]:
+        return [*_TEMPLATE_FILES, *_IDENTITY_TEMPLATE_FILES]
+    return list(_TEMPLATE_FILES)
 
 
 def _render_templates(project_dir: Path, context: dict) -> None:
@@ -54,7 +67,7 @@ def _render_templates(project_dir: Path, context: dict) -> None:
         keep_trailing_newline=True,
         autoescape=select_autoescape(enabled_extensions=("html",), default=False),
     )
-    for template_name, output_path in _TEMPLATE_FILES:
+    for template_name, output_path in _template_files(context):
         template = env.get_template(template_name)
         content = template.render(**context)
         out = project_dir / output_path
@@ -67,6 +80,9 @@ def new(
     path: Path = typer.Option(Path("."), "--path", help="Parent directory"),
     db: str = typer.Option("postgres", "--db", help="Database backend"),
     agents: bool = typer.Option(False, "--agents", help="Enable agents plugin"),
+    identity: bool = typer.Option(
+        False, "--identity", help="Enable Identity (users, JWT, RBAC) plugin"
+    ),
     ci: str = typer.Option("github", "--ci", help="CI provider"),
 ) -> None:
     """Create a new Calango project."""
@@ -86,6 +102,7 @@ def new(
             disabled={"mongo": "coming soon"},
         )
         agents = ask_confirm("Enable agents plugin?", default=False)
+        identity = ask_confirm("Enable Identity plugin (users, JWT, RBAC)?", default=False)
         ci = ask_choice(
             "CI provider",
             ["github", "gitlab"],
@@ -99,6 +116,7 @@ def new(
                 "db": db,
                 "ci": ci,
                 "agents": "enabled" if agents else "disabled",
+                "identity": "enabled" if identity else "disabled",
             },
         )
 
@@ -126,12 +144,16 @@ def new(
         raise typer.Exit(1)
 
     project_dir.mkdir(parents=True)
-    _render_templates(
-        project_dir,
-        {"project_name": name, "db": db, "agents": agents, "ci": ci},
-    )
+    context = {
+        "project_name": name,
+        "db": db,
+        "agents": agents,
+        "identity": identity,
+        "ci": ci,
+    }
+    _render_templates(project_dir, context)
 
-    created = [output_path for _, output_path in _TEMPLATE_FILES]
+    created = [output_path for _, output_path in _template_files(context)]
     display = created[:5] + ([f"+ {len(created) - 5} more files"] if len(created) > 5 else [])
     print_file_tree(name, display)
     print_success(

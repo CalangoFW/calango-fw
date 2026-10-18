@@ -1,39 +1,198 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
+from typing import Any
 
 import pytest
 from calango_identity.settings import IdentitySettings
 from pydantic import ValidationError
 
+from tests.conftest import TEST_PRIVATE_KEY, TEST_PUBLIC_KEY
+
+_INVALID_KEY_MARKERS = {
+    "PRIVATE_KEY": "PRIVATE_KEY_SECRET_MARKER",
+    "PUBLIC_KEY": "PUBLIC_KEY_SECRET_MARKER",
+}
+
+
+@pytest.fixture
+def valid_keys() -> dict[str, str]:
+    return {"PRIVATE_KEY": TEST_PRIVATE_KEY, "PUBLIC_KEY": TEST_PUBLIC_KEY}
+
+
+def _contains_secret_marker(value: Any, marker: str, seen: set[int] | None = None) -> bool:
+    """Recursively detect raw secret data, including reversible secret wrappers."""
+    if isinstance(value, str):
+        return marker in value
+
+    if seen is None:
+        seen = set()
+    if id(value) in seen:
+        return False
+    seen.add(id(value))
+
+    getter = getattr(value, "get_secret_value", None)
+    if callable(getter) and _contains_secret_marker(getter(), marker, seen):
+        return True
+    if isinstance(value, BaseException):
+        if any(
+            _contains_secret_marker(item, marker, seen)
+            for item in (value.args, value.__cause__, value.__context__)
+        ):
+            return True
+        traceback = value.__traceback__
+        while traceback is not None:
+            if _contains_secret_marker(traceback.tb_frame.f_locals, marker, seen):
+                return True
+            traceback = traceback.tb_next
+        return False
+    if isinstance(value, Mapping):
+        return any(_contains_secret_marker(item, marker, seen) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_contains_secret_marker(item, marker, seen) for item in value)
+    return False
+
+
+def _assert_no_secret_marker(value: Any, marker: str) -> None:
+    """Assert without placing the marker in the exception's caller-frame locals."""
+    assert not _contains_secret_marker(value, marker)
+
 
 def test_settings_requires_private_key():
     """IdentitySettings raises ValidationError if PRIVATE_KEY is missing."""
     with pytest.raises(ValidationError):
-        IdentitySettings(PUBLIC_KEY="some-key")  # ty: ignore[missing-argument]  # intentional
+        IdentitySettings(PUBLIC_KEY="some-key")
 
 
 def test_settings_requires_public_key():
     """IdentitySettings raises ValidationError if PUBLIC_KEY is missing."""
     with pytest.raises(ValidationError):
-        IdentitySettings(PRIVATE_KEY="some-key")  # ty: ignore[missing-argument]  # intentional
+        IdentitySettings(PRIVATE_KEY="some-key")
 
 
-def test_settings_defaults():
+def test_settings_defaults(valid_keys):
     """IdentitySettings has correct defaults for token expiry and rate limits."""
-    s = IdentitySettings(PRIVATE_KEY="pk", PUBLIC_KEY="pub")
+    s = IdentitySettings(**valid_keys)
     assert s.ACCESS_TOKEN_EXPIRE_MINUTES == 15
     assert s.REFRESH_TOKEN_EXPIRE_DAYS == 7
     assert s.RATE_LIMIT_LOGIN_PER_MINUTE == 5
     assert s.RATE_LIMIT_LOGIN_PER_HOUR_PER_EMAIL == 10
     assert s.REDIS_URL == "redis://localhost:6379/0"
+    assert s.TRUSTED_PROXIES == ()
 
 
-def test_settings_env_prefix():
+def test_settings_env_prefix(valid_keys):
     """IdentitySettings uses IDENTITY__ prefix for env vars."""
     os.environ["IDENTITY__ACCESS_TOKEN_EXPIRE_MINUTES"] = "30"
     try:
-        s = IdentitySettings(PRIVATE_KEY="pk", PUBLIC_KEY="pub")
+        s = IdentitySettings(**valid_keys)
         assert s.ACCESS_TOKEN_EXPIRE_MINUTES == 30
     finally:
         del os.environ["IDENTITY__ACCESS_TOKEN_EXPIRE_MINUTES"]
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "ACCESS_TOKEN_EXPIRE_MINUTES",
+        "REFRESH_TOKEN_EXPIRE_DAYS",
+        "RATE_LIMIT_LOGIN_PER_MINUTE",
+        "RATE_LIMIT_LOGIN_PER_HOUR_PER_EMAIL",
+    ],
+)
+def test_settings_reject_non_positive_security_values(field, valid_keys):
+    """Security durations and rate limits must be strictly positive."""
+    with pytest.raises(ValidationError):
+        IdentitySettings(**valid_keys, **{field: 0})
+
+
+def test_settings_rejects_blank_refresh_token_key_prefix(valid_keys):
+    """Refresh-token Redis keys must always retain a nonblank namespace."""
+    with pytest.raises(ValidationError):
+        IdentitySettings(**valid_keys, REFRESH_TOKEN_KEY_PREFIX=" \t\n ")
+
+
+@pytest.mark.parametrize(
+    ("field", "expected_message"),
+    [
+        (
+            "PRIVATE_KEY",
+            "PRIVATE_KEY must be a valid unencrypted PEM private key",
+        ),
+        (
+            "PUBLIC_KEY",
+            "PUBLIC_KEY must be a valid PEM public key",
+        ),
+    ],
+)
+def test_settings_rejects_invalid_pem_keys_without_exposing_inputs(
+    field, expected_message, valid_keys
+):
+    """Identity startup must reject a malformed signing or verification key."""
+    with pytest.raises(ValidationError) as error:
+        IdentitySettings(**(valid_keys | {field: _INVALID_KEY_MARKERS[field]}))
+
+    assert field in str(error.value)
+    assert expected_message in str(error.value)
+    assert field in error.value.json()
+    assert _INVALID_KEY_MARKERS[field] not in str(error.value)
+    assert _INVALID_KEY_MARKERS[field] not in repr(error.value)
+    assert _INVALID_KEY_MARKERS[field] not in repr(error.value.errors())
+    assert _INVALID_KEY_MARKERS[field] not in error.value.json()
+    _assert_no_secret_marker(error.value.errors(), _INVALID_KEY_MARKERS[field])
+    _assert_no_secret_marker(error.value, _INVALID_KEY_MARKERS[field])
+    assert error.value.__cause__ is None
+    assert error.value.__context__ is None
+
+
+def test_settings_representation_and_dumps_redact_rsa_keys(valid_keys):
+    """Configured RSA keys must not leak through routine settings serialization."""
+    settings = IdentitySettings(**valid_keys)
+
+    secret_markers = (TEST_PRIVATE_KEY.splitlines()[1], TEST_PUBLIC_KEY.splitlines()[1])
+    for rendered in (
+        repr(settings),
+        repr(settings.model_dump()),
+        settings.model_dump_json(),
+    ):
+        assert all(marker not in rendered for marker in secret_markers)
+
+
+def test_settings_normalizes_trusted_proxies_to_tuple(valid_keys):
+    """Trusted proxy configuration is immutable after settings startup."""
+    settings = IdentitySettings(
+        **valid_keys,
+        TRUSTED_PROXIES=["10.0.0.0/8", "192.0.2.10"],
+    )
+
+    assert settings.TRUSTED_PROXIES == ("10.0.0.0/8", "192.0.2.10")
+
+
+def test_settings_rejects_trusted_proxy_cidr_with_host_bits(valid_keys):
+    """A typo in a proxy CIDR must not silently broaden the trusted network."""
+    with pytest.raises(ValidationError):
+        IdentitySettings(**valid_keys, TRUSTED_PROXIES=("10.42.7.9/8",))
+
+
+def test_settings_read_identity_values_from_shared_dotenv(tmp_path, monkeypatch):
+    for name in ("IDENTITY__PRIVATE_KEY", "IDENTITY__PUBLIC_KEY", "IDENTITY__REDIS_URL"):
+        monkeypatch.delenv(name, raising=False)
+
+    def escaped(pem: str) -> str:
+        return pem.replace("\n", "\\n")
+
+    (tmp_path / ".env").write_text(
+        "CALANGO_ENV=development\n"
+        "SECURITY__SECRET_KEY=shared-application-secret\n"
+        f'IDENTITY__PRIVATE_KEY="{escaped(TEST_PRIVATE_KEY)}"\n'
+        f'IDENTITY__PUBLIC_KEY="{escaped(TEST_PUBLIC_KEY)}"\n'
+        "IDENTITY__REDIS_URL=redis://cache:6379/2\n"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    settings = IdentitySettings()
+
+    assert settings.PRIVATE_KEY.get_secret_value() == TEST_PRIVATE_KEY
+    assert settings.PUBLIC_KEY.get_secret_value() == TEST_PUBLIC_KEY
+    assert settings.REDIS_URL == "redis://cache:6379/2"

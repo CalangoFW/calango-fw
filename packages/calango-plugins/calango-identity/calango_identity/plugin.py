@@ -1,14 +1,26 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import timedelta
+from importlib import import_module
+from importlib.resources import files
 from typing import ClassVar
 
 import redis.asyncio as redis
+from calango_plugin_base import PluginMigration
 from fastapi import FastAPI, Request, Response
 from pydantic_settings import BaseSettings
+from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 
-from calango_identity.dependencies import enforce_authentication
+from calango import Calango
+from calango_identity.dependencies import (
+    get_current_user,
+    install_user_resolver,
+    make_authentication_guard,
+    make_optional_current_user_resolver,
+)
+from calango_identity.events import IdentityEvents, LoggingIdentityEvents
 from calango_identity.rate_limit import make_limiter
 from calango_identity.refresh_tokens import RedisRefreshTokenStore, RefreshTokenStore
 from calango_identity.router import make_auth_router, make_fastapi_users
@@ -38,11 +50,24 @@ class IdentityPlugin:
         self,
         settings: IdentitySettings | None = None,
         refresh_store: RefreshTokenStore | None = None,
+        limiter: Limiter | None = None,
+        *,
+        events: IdentityEvents | None = None,
+        enable_password_reset: bool = False,
+        enable_verification: bool = False,
     ) -> None:
-        # pydantic-settings populates PRIVATE_KEY/PUBLIC_KEY from env at runtime;
-        # ty has no pydantic plugin so it sees them as missing required args.
-        self._settings = settings or IdentitySettings()  # ty: ignore[missing-argument]
-        self._limiter = make_limiter(self._settings.REDIS_URL)
+        self._settings = settings or IdentitySettings()
+        self._events = events
+        self._enable_password_reset = enable_password_reset
+        self._enable_verification = enable_verification
+        self._owned_limiter: Limiter | None = None
+        if limiter is None:
+            limiter = make_limiter(
+                self._settings.REDIS_URL,
+                self._settings.TRUSTED_PROXIES,
+            )
+            self._owned_limiter = limiter
+        self._limiter = limiter
         self._owned_redis_client: redis.Redis | None = None
         if refresh_store is not None:
             self.refresh_store = refresh_store
@@ -57,47 +82,87 @@ class IdentityPlugin:
 
     def register(self, app: FastAPI) -> None:
         """Register auth routers, rate limiter, and exception handler."""
-        existing_routes = tuple(app.routes)
+        if not isinstance(app, Calango):
+            raise TypeError("IdentityPlugin requires a Calango application")
+        events = self._resolve_events(app.settings.ENV)
 
         # Rate limiting middleware
         app.state.limiter = self._limiter
         # slowapi's handler signature is broader than Starlette's expected type;
         # the mismatch is benign at runtime.
         app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # ty: ignore[invalid-argument-type]
-        if self._owned_redis_client is not None:
-            app.router.add_event_handler("shutdown", self._close_owned_redis_client)
 
-        # Auth router — uses calango-core get_db if available, else a no-op stub
-        try:
-            from calango.core.database import get_db
-        except ImportError:
-
-            async def get_db():  # type: ignore[misc]  # pragma: no cover
-                yield None
-
-        fastapi_users = make_fastapi_users(self._settings, get_db)
+        session_dependency = app.database.session
+        fastapi_users = make_fastapi_users(self._settings, session_dependency, events)
+        resolver = make_optional_current_user_resolver(self._settings, session_dependency)
+        install_user_resolver(app, resolver)
+        app.add_dependency_request_guard(
+            make_authentication_guard(),
+            dependency=get_current_user,
+            resolver=resolver,
+        )
         auth_router = make_auth_router(
             settings=self._settings,
-            get_db=get_db,
+            get_db=session_dependency,
             refresh_store=self.refresh_store,
             limiter=self._limiter,
             fastapi_users=fastapi_users,
+            events=events,
+            enable_password_reset=self._enable_password_reset,
+            enable_verification=self._enable_verification,
         )
         app.include_router(auth_router)
-        enforce_authentication(
-            app,
-            fastapi_users.current_user(optional=True, active=True),
-            existing_routes,
-        )
 
-    async def _close_owned_redis_client(self) -> None:
-        """Close only the async Redis client constructed by this plugin."""
-        if self._owned_redis_client is not None:
-            await self._owned_redis_client.aclose()
+        @asynccontextmanager
+        async def owned_resource_lifespan(_app: Calango):
+            try:
+                yield
+            finally:
+                await self._close_owned_resources()
 
-    def migrations(self) -> list[str]:
-        """Return Alembic migration paths for identity tables."""
-        return ["calango_identity.migrations"]
+        app.add_plugin_lifespan(owned_resource_lifespan)
+
+    def _resolve_events(self, env: str) -> IdentityEvents | None:
+        """Pick the events provider, failing at startup on unsafe production setups."""
+        if env != "production":
+            return self._events or LoggingIdentityEvents()
+        if isinstance(self._events, LoggingIdentityEvents):
+            raise RuntimeError(
+                "LoggingIdentityEvents is development-only; inject an IdentityEvents "
+                "provider that delivers tokens in production"
+            )
+        if self._events is None and (self._enable_password_reset or self._enable_verification):
+            raise RuntimeError(
+                "Password reset and verification endpoints need an IdentityEvents "
+                "provider in production: pass IdentityPlugin(events=...)"
+            )
+        return self._events
+
+    async def _close_owned_resources(self) -> None:
+        """Close constructed async and sync backends at the end of each lifespan.
+
+        Both clients reconnect lazily, so a later lifespan cycle reopens them and
+        must close them again.
+        """
+        try:
+            if self._owned_redis_client is not None:
+                await self._owned_redis_client.aclose()
+        finally:
+            if self._owned_limiter is not None:
+                storage = self._owned_limiter.limiter.storage
+                storage_client = getattr(storage, "storage", None)
+                close = getattr(storage_client, "close", None)
+                if callable(close):
+                    close()
+
+    def import_models(self) -> None:
+        """Register Identity models explicitly with canonical metadata."""
+        import_module("calango_identity.models")
+
+    def migrations(self) -> tuple[PluginMigration, ...]:
+        """Return the wheel-safe location for identity revisions."""
+        versions = files("calango_identity.migrations.versions")
+        return (PluginMigration("identity", versions, ()),)
 
     def settings(self) -> type[BaseSettings]:
         """Return the IdentitySettings class."""

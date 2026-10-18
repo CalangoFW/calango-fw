@@ -302,13 +302,22 @@ calango db suggest-indexes  # analyzes pg_stat_statements, suggests + generates 
 `packages/calango-plugins/calango-identity/`
 
 - Base: FastAPI-Users + JWT RS256 (asymmetric)
-- Endpoints: `POST /auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/register`, `/auth/forgot-password`, `/auth/reset-password`, and `/users`
-- `@public` decorator for public endpoints
-- `require_permission("resource:action")` for RBAC
-- Rate limit on `/auth/login`: 5/min per IP, 10/hour per normalized email
+- Endpoints: `POST /auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/register`, and `/users`; password reset and e-mail verification are opt-in
+- Private by default: every HTTP route and mount needs a bearer token, through Calango's supported request-guard API; `@public` and `app.mount(..., public=True)` are the explicit exceptions; WebSockets are documented as outside the guard
+- `require_permission("resource:action")` for RBAC (401 anonymous, 403 missing permission)
+- Rate limit on `/auth/login`: 5/min per IP (proxy-aware only for trusted proxies), 10/hour per normalized email
 - JWT: access=15min, refresh=7-day absolute lifetime with atomic rotation and reuse-family revocation
-- Refresh tokens: opaque values stored only as SHA-256 digests; Redis failures fail closed
+- Refresh tokens: opaque values stored only as SHA-256 digests; token responses are `no-store`
+- Redis outages in the refresh store or login limiter return a uniform 503
+- `IdentityEvents` provider for registration, login, reset and verification delivery; production refuses delivery endpoints without one
+- Shipped Alembic migration on the canonical `calango.db.Base`, applied by `calango db migrate`
+- `calango new --identity` generates a wired project
 - Argon2 for password hashing
+
+**Phase 6 remediation (2026-10):** verified by 499 tests, including integration
+tests against real PostgreSQL and Redis and an end-to-end test that scaffolds
+`calango new --identity`, migrates, serves the app and runs register → login →
+private/public → refresh → logout.
 
 ---
 

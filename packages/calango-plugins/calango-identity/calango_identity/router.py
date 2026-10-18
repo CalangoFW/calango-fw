@@ -1,17 +1,25 @@
 from __future__ import annotations
 
+import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from functools import wraps
 from json import JSONDecodeError
+from typing import Any
 
 from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi.routing import APIRoute
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi_users import FastAPIUsers, exceptions
+from limits.errors import StorageError
 from pydantic import ValidationError
+from redis.exceptions import RedisError
 from slowapi import Limiter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from calango.exceptions import AuthenticationError, ServiceUnavailableError
+from calango_identity.dependencies import identity_public
+from calango_identity.events import IdentityEvents
 from calango_identity.manager import UserManager, make_get_user_manager
 from calango_identity.models import User
 from calango_identity.rate_limit import capture_login_email, get_email_key
@@ -30,6 +38,8 @@ from calango_identity.schemas import (
 from calango_identity.security import create_access_token, make_auth_backend
 from calango_identity.settings import IdentitySettings
 
+logger = logging.getLogger(__name__)
+
 _REFRESH_TOKEN_OPENAPI_BODY = {
     "requestBody": {
         "required": True,
@@ -42,10 +52,48 @@ _REFRESH_TOKEN_OPENAPI_BODY = {
 }
 
 
+def _mark_identity_public_routes(router: APIRouter) -> APIRouter:
+    """Mark every direct route in an Identity-owned anonymous router."""
+    for route in router.routes:
+        if isinstance(route, APIRoute):
+            identity_public(route.endpoint)
+    return router
+
+
+def _log_storage_unavailable(component: str, exc: Exception) -> None:
+    """Record a storage outage by exception type only; messages may carry secrets."""
+    logger.error(
+        "Identity %s storage unavailable",
+        component,
+        extra={"error_type": type(exc).__name__},
+    )
+
+
+def set_no_store(response: Response) -> None:
+    """Forbid shared and browser caches from storing issued credentials."""
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+
+
+def _translate_rate_limit_storage_errors(endpoint: Callable[..., Awaitable[Any]]) -> Any:
+    """Report rate-limit storage outages with the uniform authentication 503."""
+
+    @wraps(endpoint)
+    async def translated(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return await endpoint(*args, **kwargs)
+        except (RedisError, StorageError) as exc:
+            _log_storage_unavailable("rate limit", exc)
+        raise ServiceUnavailableError("Authentication service unavailable")
+
+    return translated
+
+
 def _translate_refresh_error(
     exc: Exception,
 ) -> AuthenticationError | ServiceUnavailableError:
     if isinstance(exc, RefreshTokenStorageError):
+        _log_storage_unavailable("refresh token", exc)
         return ServiceUnavailableError("Authentication service unavailable")
     return AuthenticationError("Invalid refresh token")
 
@@ -64,10 +112,11 @@ async def _parse_refresh_token(request: Request) -> str:
 def make_fastapi_users(
     settings: IdentitySettings,
     get_db: Callable,
+    events: IdentityEvents | None = None,
 ) -> FastAPIUsers[User, uuid.UUID]:
     """Build the shared FastAPI Users object for routers and global auth."""
     auth_backend = make_auth_backend(settings)
-    get_user_manager_factory = make_get_user_manager(settings)
+    get_user_manager_factory = make_get_user_manager(settings, events)
 
     async def _get_user_manager(session: AsyncSession = Depends(get_db)):  # noqa: B008
         async for manager in get_user_manager_factory(session):
@@ -82,6 +131,10 @@ def make_auth_router(
     refresh_store: RefreshTokenStore,
     limiter: Limiter,
     fastapi_users: FastAPIUsers[User, uuid.UUID] | None = None,
+    *,
+    events: IdentityEvents | None = None,
+    enable_password_reset: bool = False,
+    enable_verification: bool = False,
 ) -> APIRouter:
     """Build and return the auth APIRouter wired to the given session dependency.
 
@@ -91,13 +144,18 @@ def make_auth_router(
         refresh_store: persistence for issuing and rotating refresh tokens.
         limiter: shared SlowAPI limiter also installed on the application.
         fastapi_users: optional shared authentication bundle from the plugin.
+        events: provider that receives account events and delivery tokens.
+        enable_password_reset: include the forgot/reset-password endpoints.
+        enable_verification: include the request-verify/verify endpoints.
     """
-    fu = fastapi_users or make_fastapi_users(settings, get_db)
+    fu = fastapi_users or make_fastapi_users(settings, get_db, events)
     get_user_manager = fu.get_user_manager
 
     router = APIRouter()
 
     @router.post("/auth/login", response_model=TokenResponse, tags=["auth"])
+    @identity_public
+    @_translate_rate_limit_storage_errors
     @limiter.limit(f"{settings.RATE_LIMIT_LOGIN_PER_MINUTE}/minute")
     @limiter.limit(
         f"{settings.RATE_LIMIT_LOGIN_PER_HOUR_PER_EMAIL}/hour",
@@ -124,6 +182,7 @@ def make_auth_router(
             expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         )
         await user_manager.on_after_login(user, request, response)
+        set_no_store(response)
         return token_response
 
     @router.post(
@@ -132,8 +191,10 @@ def make_auth_router(
         tags=["auth"],
         openapi_extra=_REFRESH_TOKEN_OPENAPI_BODY,
     )
+    @identity_public
     async def refresh(
         request: Request,
+        response: Response,
         user_manager: UserManager = Depends(get_user_manager),  # noqa: B008
     ) -> TokenResponse:
         token = await _parse_refresh_token(request)
@@ -149,6 +210,7 @@ def make_auth_router(
         if not user.is_active:
             raise AuthenticationError("Invalid refresh token")
 
+        set_no_store(response)
         return TokenResponse(
             access_token=await create_access_token(user, settings),
             refresh_token=refresh_token.token,
@@ -161,6 +223,7 @@ def make_auth_router(
         tags=["auth"],
         openapi_extra=_REFRESH_TOKEN_OPENAPI_BODY,
     )
+    @identity_public
     async def logout(request: Request) -> None:
         token = await _parse_refresh_token(request)
         try:
@@ -169,15 +232,22 @@ def make_auth_router(
             raise _translate_refresh_error(exc) from exc
 
     router.include_router(
-        fu.get_register_router(UserRead, UserCreate),
+        _mark_identity_public_routes(fu.get_register_router(UserRead, UserCreate)),
         prefix="/auth",
         tags=["auth"],
     )
-    router.include_router(
-        fu.get_reset_password_router(),
-        prefix="/auth",
-        tags=["auth"],
-    )
+    if enable_password_reset:
+        router.include_router(
+            _mark_identity_public_routes(fu.get_reset_password_router()),
+            prefix="/auth",
+            tags=["auth"],
+        )
+    if enable_verification:
+        router.include_router(
+            _mark_identity_public_routes(fu.get_verify_router(UserRead)),
+            prefix="/auth",
+            tags=["auth"],
+        )
     router.include_router(
         fu.get_users_router(UserRead, UserUpdate),
         prefix="/users",

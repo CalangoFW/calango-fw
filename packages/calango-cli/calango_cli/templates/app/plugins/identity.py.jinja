@@ -1,0 +1,14 @@
+"""Identity plugin configuration: users, JWT RS256, refresh tokens and RBAC."""
+
+from calango_identity import IdentityPlugin
+
+
+def identity_plugin() -> IdentityPlugin:
+    """Build Identity from the IDENTITY__* settings.
+
+    Password reset and e-mail verification stay disabled until you inject an
+    IdentityEvents provider that delivers their tokens, for example:
+
+        return IdentityPlugin(events=EmailDelivery(), enable_password_reset=True)
+    """
+    return IdentityPlugin()

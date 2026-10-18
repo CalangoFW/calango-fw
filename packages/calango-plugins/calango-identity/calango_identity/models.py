@@ -1,16 +1,10 @@
 from __future__ import annotations
 
-import uuid
-from uuid import UUID
-
 from fastapi_users.db import SQLAlchemyBaseUserTableUUID
 from sqlalchemy import Column, ForeignKey, String, Table
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-
-class Base(DeclarativeBase):
-    pass
-
+from calango.db import Base
 
 # Junction tables — pure many-to-many associations, no extra columns
 user_roles = Table(
@@ -48,7 +42,6 @@ class User(SQLAlchemyBaseUserTableUUID, Base):
 class Role(Base):
     __tablename__ = "identity_roles"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
 
     users: Mapped[list[User]] = relationship(
@@ -66,7 +59,6 @@ class Role(Base):
 class Permission(Base):
     __tablename__ = "identity_permissions"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     code: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
 
     roles: Mapped[list[Role]] = relationship(

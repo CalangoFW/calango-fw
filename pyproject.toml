@@ -16,6 +16,7 @@ dev = [
     "ty>=0.0.1a1",
     "pytest-cov>=7.1.0",
     "aiosqlite>=0.22.1",
+    "alembic>=1.14",
     "fakeredis[lua]>=2.26",
     "pip-audit>=2.7",
 ]
@@ -32,3 +33,6 @@ addopts = "-v --tb=short --import-mode=importlib"
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+markers = [
+    "integration: needs real PostgreSQL/Redis (Docker or CALANGO_TEST_*_URL); skipped otherwise",
+]

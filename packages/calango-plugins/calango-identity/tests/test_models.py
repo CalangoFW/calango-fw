@@ -7,6 +7,16 @@ import pytest
 from calango_identity.models import Base, Permission, Role, User
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from calango.db import Base as CalangoBase
+
+IDENTITY_TABLES = {
+    "identity_permissions",
+    "identity_role_permissions",
+    "identity_roles",
+    "identity_user_roles",
+    "identity_users",
+}
+
 
 @pytest.fixture
 async def session() -> AsyncGenerator[AsyncSession, None]:
@@ -77,3 +87,31 @@ async def test_all_tables_use_identity_prefix(session):
     assert User.__tablename__ == "identity_users"
     assert Role.__tablename__ == "identity_roles"
     assert Permission.__tablename__ == "identity_permissions"
+
+
+def test_identity_uses_canonical_metadata():
+    """Identity models register with the metadata used by application migrations."""
+    assert User.metadata is CalangoBase.metadata
+    assert Base is CalangoBase
+    assert IDENTITY_TABLES <= CalangoBase.metadata.tables.keys()
+
+
+def test_identity_entities_include_canonical_audit_columns():
+    """Canonical timestamps remain mapped on every concrete identity entity."""
+    expected_columns = {
+        "identity_users": {
+            "id",
+            "email",
+            "hashed_password",
+            "is_active",
+            "is_superuser",
+            "is_verified",
+            "created_at",
+            "updated_at",
+        },
+        "identity_roles": {"id", "name", "created_at", "updated_at"},
+        "identity_permissions": {"id", "code", "created_at", "updated_at"},
+    }
+
+    for table_name, column_names in expected_columns.items():
+        assert set(CalangoBase.metadata.tables[table_name].columns.keys()) == column_names

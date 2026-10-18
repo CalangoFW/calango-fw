@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -17,6 +19,7 @@ from calango_identity.router import _parse_refresh_token, make_auth_router
 from calango_identity.settings import IdentitySettings
 from httpx import ASGITransport, AsyncClient, Response
 from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from starlette.requests import Request as StarletteRequest
 
@@ -56,28 +59,89 @@ def limiter() -> Limiter:
     return make_limiter("memory://")
 
 
+class DeliveryRecorder:
+    """Identity events provider that records delivered tokens by user id."""
+
+    def __init__(self) -> None:
+        self.password_resets: list[tuple[str, str]] = []
+        self.verifications: list[tuple[str, str]] = []
+
+    async def on_registered(self, user, request) -> None:
+        pass
+
+    async def on_login(self, user, request, response) -> None:
+        pass
+
+    async def send_password_reset(self, user, token: str, request) -> None:
+        self.password_resets.append((str(user.id), token))
+
+    async def send_verification(self, user, token: str, request) -> None:
+        self.verifications.append((str(user.id), token))
+
+
+class FailingDelivery(DeliveryRecorder):
+    async def send_password_reset(self, user, token: str, request) -> None:
+        raise RuntimeError("provider outage")
+
+
+@pytest.fixture
+def delivered() -> DeliveryRecorder:
+    return DeliveryRecorder()
+
+
+@asynccontextmanager
+async def _serve_auth_router(session: AsyncSession, **router_options):
+    app = Calango()
+    app.state.limiter = router_options["limiter"]
+
+    # Pass a dependency that yields the test session
+    async def get_db():
+        yield session
+
+    app.include_router(
+        make_auth_router(
+            get_db=get_db,
+            enable_password_reset=True,
+            enable_verification=True,
+            **router_options,
+        )
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac
+
+
 @pytest.fixture
 async def client(
     session: AsyncSession,
     settings: IdentitySettings,
     refresh_store: InMemoryRefreshTokenStore,
     limiter: Limiter,
+    delivered: DeliveryRecorder,
 ):
-    app = Calango()
-    app.state.limiter = limiter
-
-    # Pass a dependency that yields the test session
-    async def get_db():
-        yield session
-
-    router = make_auth_router(
+    async with _serve_auth_router(
+        session,
         settings=settings,
-        get_db=get_db,
         refresh_store=refresh_store,
         limiter=limiter,
-    )
-    app.include_router(router)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        events=delivered,
+    ) as ac:
+        yield ac
+
+
+@pytest.fixture
+async def failing_delivery_client(
+    session: AsyncSession,
+    settings: IdentitySettings,
+    refresh_store: InMemoryRefreshTokenStore,
+    limiter: Limiter,
+):
+    async with _serve_auth_router(
+        session,
+        settings=settings,
+        refresh_store=refresh_store,
+        limiter=limiter,
+        events=FailingDelivery(),
+    ) as ac:
         yield ac
 
 
@@ -113,6 +177,45 @@ async def unavailable_client(
     app.include_router(router)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
+
+
+DEAD_REDIS_HOST = "127.0.0.1:1"
+
+
+@pytest.fixture(
+    params=[
+        pytest.param(({}, "ConnectionError"), id="redis-error"),
+        pytest.param(({"wrap_exceptions": True}, "StorageError"), id="wrapped-storage-error"),
+    ]
+)
+async def dead_limiter_client(
+    request: pytest.FixtureRequest,
+    session: AsyncSession,
+    settings: IdentitySettings,
+    refresh_store: InMemoryRefreshTokenStore,
+):
+    """Auth app whose rate-limit storage points at a port nothing listens on."""
+    storage_options, error_type = request.param
+    limiter = Limiter(
+        key_func=get_remote_address,
+        storage_uri=f"redis://{DEAD_REDIS_HOST}/0",
+        storage_options=storage_options,
+    )
+    app = Calango()
+    app.state.limiter = limiter
+
+    async def get_db():
+        yield session
+
+    router = make_auth_router(
+        settings=settings,
+        get_db=get_db,
+        refresh_store=refresh_store,
+        limiter=limiter,
+    )
+    app.include_router(router)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac, error_type
 
 
 async def register_user(client: AsyncClient, email: str) -> None:
@@ -397,6 +500,103 @@ async def test_logout_returns_uniform_503_when_store_is_unavailable(unavailable_
     assert response.status_code == 503
     assert response.json()["error"] == "service_unavailable"
     assert response.json()["message"] == "Authentication service unavailable"
+
+
+async def test_rate_limit_storage_outage_returns_uniform_503_to_login(dead_limiter_client):
+    client, _ = dead_limiter_client
+    response = await client.post(
+        "/auth/login",
+        data={"username": "limiter-outage@example.com", "password": "SecurePassword123!"},
+    )
+    assert response.status_code == 503, response.text
+    assert response.json()["error"] == "service_unavailable"
+    assert response.json()["message"] == "Authentication service unavailable"
+    assert DEAD_REDIS_HOST not in response.text
+
+
+async def test_rate_limit_storage_outage_is_logged_without_credentials(dead_limiter_client, caplog):
+    client, error_type = dead_limiter_client
+    caplog.set_level(logging.ERROR, logger="calango_identity.router")
+    await client.post(
+        "/auth/login",
+        data={"username": "logged-outage@example.com", "password": "SecretPassword123!"},
+    )
+
+    records = [record for record in caplog.records if record.name == "calango_identity.router"]
+    assert len(records) == 1
+    assert records[0].error_type == error_type
+    assert records[0].exc_info is None
+    message = records[0].getMessage()
+    for secret in ("logged-outage@example.com", "SecretPassword123!", DEAD_REDIS_HOST):
+        assert secret not in message
+
+
+async def test_refresh_store_outage_is_logged_without_diagnostics(unavailable_client, caplog):
+    caplog.set_level(logging.ERROR, logger="calango_identity.router")
+    await unavailable_client.post("/auth/refresh", json={"refresh_token": "x" * 43})
+
+    records = [record for record in caplog.records if record.name == "calango_identity.router"]
+    assert len(records) == 1
+    assert records[0].error_type == "RefreshTokenStorageError"
+    assert "sensitive storage diagnostics" not in records[0].getMessage()
+
+
+async def test_login_response_is_not_cacheable(client):
+    await register_user(client, "no-store-login@example.com")
+    response = await client.post(
+        "/auth/login",
+        data={"username": "no-store-login@example.com", "password": "SecurePassword123!"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["pragma"] == "no-cache"
+
+
+async def test_refresh_response_is_not_cacheable(client):
+    login = await login_user(client, "no-store-refresh@example.com")
+    response = await client.post("/auth/refresh", json={"refresh_token": login["refresh_token"]})
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["pragma"] == "no-cache"
+
+
+async def test_forgot_password_delivers_reset_token_to_provider(client, delivered):
+    registered = await client.post(
+        "/auth/register",
+        json={"email": "reset@example.com", "password": "SecurePassword123!"},
+    )
+    response = await client.post("/auth/forgot-password", json={"email": "reset@example.com"})
+
+    assert response.status_code == 202
+    assert [(user_id, bool(token)) for user_id, token in delivered.password_resets] == [
+        (registered.json()["id"], True)
+    ]
+
+
+async def test_forgot_password_provider_failure_matches_unknown_email(failing_delivery_client):
+    await register_user(failing_delivery_client, "known@example.com")
+    known = await failing_delivery_client.post(
+        "/auth/forgot-password", json={"email": "known@example.com"}
+    )
+    unknown = await failing_delivery_client.post(
+        "/auth/forgot-password", json={"email": "missing@example.com"}
+    )
+
+    assert known.status_code == unknown.status_code == 202
+    assert known.json() == unknown.json()
+
+
+async def test_request_verify_token_delivers_verification_token(client, delivered):
+    registered = await client.post(
+        "/auth/register",
+        json={"email": "verify@example.com", "password": "SecurePassword123!"},
+    )
+    response = await client.post("/auth/request-verify-token", json={"email": "verify@example.com"})
+
+    assert response.status_code == 202
+    assert [(user_id, bool(token)) for user_id, token in delivered.verifications] == [
+        (registered.json()["id"], True)
+    ]
 
 
 async def test_forgot_password_returns_202(client):

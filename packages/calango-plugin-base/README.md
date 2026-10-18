@@ -22,7 +22,8 @@ A conforming plugin supplies these attributes and methods:
 | `version: str` | Plugin version. |
 | `requires: list[str]` | Required package dependencies. |
 | `register(app: FastAPI) -> None` | Register routers, middleware, handlers, or lifecycle hooks. |
-| `migrations() -> list[str]` | Return Alembic migration module paths contributed by the plugin. |
+| `import_models() -> None` | Import every plugin model into the canonical SQLAlchemy metadata. |
+| `migrations() -> tuple[PluginMigration, ...]` | Return wheel-safe Alembic migration descriptors contributed by the plugin. |
 | `settings() -> type[BaseSettings]` | Return the plugin's Pydantic settings class. |
 | `test_fixtures() -> list` | Return pytest fixtures made available to consuming projects. |
 | `context_md() -> str` | Return the plugin's `CLAUDE.md` guidance block. |
@@ -35,6 +36,7 @@ when a required member is missing.
 ```python
 from fastapi import APIRouter, FastAPI
 from pydantic_settings import BaseSettings
+from calango_plugin_base import PluginMigration
 
 router = APIRouter()
 
@@ -56,8 +58,11 @@ class GreetingPlugin:
     def register(self, app: FastAPI) -> None:
         app.include_router(router)
 
-    def migrations(self) -> list[str]:
-        return []
+    def import_models(self) -> None:
+        import greeting_plugin.models
+
+    def migrations(self) -> tuple[PluginMigration, ...]:
+        return ()
 
     def settings(self) -> type[BaseSettings]:
         return GreetingSettings

@@ -5,21 +5,28 @@ description = "Calango Framework — Identity plugin (JWT RS256 + RBAC)"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "calango-core",
     "calango-plugin-base",
     "cryptography>=50.0.0",
     "fastapi>=0.141.1",
     "fastapi-users[sqlalchemy]>=13.0",
+    "pyjwt>=2.15.1",  # security floor: PYSEC-2026 advisories in <2.15
     "pydantic-settings>=2.14.2",
     "sqlalchemy[asyncio]>=2.0.36",
     "asyncpg>=0.30",
     "slowapi>=0.1.9",
+    "limits>=5.8",
     "redis>=5.2",
     "argon2-cffi>=23",
     "python-multipart>=0.0.31",
     "starlette>=1.3.1",
 ]
 
+[project.entry-points."calango.plugins"]
+identity = "calango_identity.plugin:IdentityPlugin"
+
 [tool.uv.sources]
+calango-core = { workspace = true }
 calango-plugin-base = { workspace = true }
 
 [build-system]

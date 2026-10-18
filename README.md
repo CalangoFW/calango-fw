@@ -13,7 +13,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-2CBD6B?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![License](https://img.shields.io/badge/license-PolyForm%20NonCommercial-2CBD6B?style=flat-square)](LICENSE)
 [![Status](https://img.shields.io/badge/status-early%20development-E29A2E?style=flat-square)]()
-[![Tests](https://img.shields.io/badge/tests-161%20passing-2CBD6B?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-499%20passing-2CBD6B?style=flat-square)]()
 
 *Convention over Configuration. TDD as the default path. AI as a first-class citizen.*
 
@@ -86,7 +86,7 @@ calango plugin add search        # FTS, Typesense, Meilisearch
 
 ## What works today
 
-`calango-core` is fully implemented with 54 tests and 97% coverage. `calango-cli` (`calango new` + `calango generate resource`) is implemented with 107 tests.
+499 tests pass across the workspace: `calango-core` (133), `calango-cli` (176), `calango-plugin-base` (7) and `calango-identity` (183), including integration and end-to-end tests that run against real PostgreSQL and Redis.
 
 ### App factory with built-in security
 
@@ -165,7 +165,7 @@ settings = CalangoSettings(
 ```
 
 ```bash
-APP_NAME="Store API" SECURITY__SECRET_KEY="key" uv run uvicorn app:app
+CALANGO_APP_NAME="Store API" SECURITY__SECRET_KEY="key" uv run uvicorn app:app
 ```
 
 ### 🏗️ Full scaffold in one command
@@ -183,6 +183,14 @@ calango new my-api --db=postgres --ci=github --agents
 # ✓ Git initialized with Conventional Commits enforced
 # ✓ pyproject.toml with 80% coverage gate
 # ✓ SAST + SCA security gate (Ruff S + Opengrep + pip-audit)
+```
+
+Add `--identity` to start with users, JWT RS256, refresh-token rotation and RBAC
+already wired — every HTTP route and mount private by default:
+
+```bash
+calango new my-api --identity
+cd my-api && calango db migrate   # applies Identity's tables with your own migrations
 ```
 
 ### 🧪 TDD as the path of least resistance
@@ -410,14 +418,15 @@ See [ROADMAP.md](ROADMAP.md) for the full breakdown.
 
 | Component | Status |
 |---|---|
-| `calango-core` — exceptions, settings, types | ✅ Done (21 tests) |
-| `calango-core` — app factory, middleware, handlers | ✅ Done (10 tests) |
+| `calango-core` — exceptions, settings, types | ✅ Done |
+| `calango-core` — app factory, middleware, handlers, database lifecycle, request guards | ✅ Done |
 | `calango-cli` — `calango new` | ✅ Done |
 | `calango-cli` — `calango generate resource` | ✅ Done (scaffold; no DB layer yet) |
 | `calango-cli` — `calango check:security` (SAST + SCA) | ✅ Done |
 | `calango-core` — `BaseRepository` + `BaseService` | ✅ Done |
 | `calango-cli` — `calango db` (revision/migrate/rollback/seed) | ✅ Done |
-| `calango-identity` — JWT RS256, RBAC, rate limit, refresh-token rotation | ✅ Done |
+| `calango-identity` — JWT RS256, RBAC, rate limit, refresh-token rotation, account events | ✅ Done |
+| `calango-cli` — `calango new --identity` (verified end to end) | ✅ Done |
 | `calango-agents` | 🔴 Planned |
 | `calango-payments` | 🔴 Planned |
 | Documentation | 🔴 Planned |

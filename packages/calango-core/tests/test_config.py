@@ -1,3 +1,6 @@
+import warnings
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -42,7 +45,9 @@ class TestSecuritySettings:
 
 
 class TestCalangoSettings:
-    def test_defaults_de_aplicacao(self):
+    def test_defaults_de_aplicacao(self, monkeypatch):
+        for name in ("APP_NAME", "VERSION", "ENV", "DEBUG"):
+            monkeypatch.delenv(name, raising=False)
         settings = CalangoSettings(security=SecuritySettings(SECRET_KEY="test-key"))
         assert settings.APP_NAME == "Calango App"
         assert settings.VERSION == "0.1.0"
@@ -67,3 +72,87 @@ class TestCalangoSettings:
             security=SecuritySettings(SECRET_KEY="test-key"),
         )
         assert settings.APP_NAME == "Minha API"
+
+
+def test_calango_prefix_wins(monkeypatch):
+    monkeypatch.setenv("DEBUG", "release")
+    monkeypatch.setenv("CALANGO_DEBUG", "true")
+    value = CalangoSettings(security=SecuritySettings(SECRET_KEY="test"))
+    assert value.DEBUG is True
+
+
+def test_legacy_name_warns_without_value(monkeypatch):
+    monkeypatch.delenv("CALANGO_APP_NAME", raising=False)
+    monkeypatch.setenv("APP_NAME", "legacy-secret-like-value")
+    with pytest.warns(DeprecationWarning, match="APP_NAME") as records:
+        value = CalangoSettings(security=SecuritySettings(SECRET_KEY="test"))
+    assert value.APP_NAME == "legacy-secret-like-value"
+    assert "legacy-secret-like-value" not in str(records[0].message)
+
+
+def test_calango_prefix_does_not_rename_nested_process_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE__URL", "sqlite+aiosqlite:///nested.db")
+    monkeypatch.setenv("REDIS__URL", "redis://nested:6379/3")
+    monkeypatch.setenv("SECURITY__SECRET_KEY", "nested-secret")
+    monkeypatch.setenv("CALANGO_DATABASE__URL", "sqlite+aiosqlite:///wrong.db")
+
+    settings = CalangoSettings()  # ty: ignore[missing-argument]  # loaded from environment
+
+    assert settings.database.URL == "sqlite+aiosqlite:///nested.db"
+    assert settings.redis.URL == "redis://nested:6379/3"
+    assert settings.security.SECRET_KEY == "nested-secret"
+
+
+def test_nested_and_legacy_settings_load_from_dotenv(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in (
+        "APP_NAME",
+        "CALANGO_APP_NAME",
+        "DATABASE__URL",
+        "REDIS__URL",
+        "SECURITY__SECRET_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "APP_NAME=dotenv-legacy\n"
+        "DATABASE__URL=sqlite+aiosqlite:///dotenv.db\n"
+        "REDIS__URL=redis://dotenv:6379/4\n"
+        "SECURITY__SECRET_KEY=dotenv-secret\n"
+    )
+
+    with pytest.warns(DeprecationWarning, match="APP_NAME") as records:
+        settings = CalangoSettings(  # ty: ignore[missing-argument]
+            _env_file=env_file  # ty: ignore[unknown-argument]
+        )
+
+    assert settings.APP_NAME == "dotenv-legacy"
+    assert settings.database.URL == "sqlite+aiosqlite:///dotenv.db"
+    assert settings.redis.URL == "redis://dotenv:6379/4"
+    assert settings.security.SECRET_KEY == "dotenv-secret"
+    assert "dotenv-legacy" not in str(records[0].message)
+
+
+def test_namespaced_dotenv_value_wins_over_process_legacy_without_warning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in ("VERSION", "ENV", "DEBUG"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("APP_NAME", "process-legacy")
+    monkeypatch.delenv("CALANGO_APP_NAME", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text("CALANGO_APP_NAME=dotenv-namespaced\nSECURITY__SECRET_KEY=dotenv-secret\n")
+
+    with warnings.catch_warnings(record=True) as records:
+        warnings.simplefilter("always", DeprecationWarning)
+        settings = CalangoSettings(  # ty: ignore[missing-argument]
+            _env_file=env_file  # ty: ignore[unknown-argument]
+        )
+
+    assert settings.APP_NAME == "dotenv-namespaced"
+    assert not [record for record in records if "APP_NAME" in str(record.message)]

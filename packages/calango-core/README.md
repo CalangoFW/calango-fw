@@ -80,15 +80,22 @@ Unhandled exceptions always return 500 with no internal details exposed.
 
 ## Configuration
 
-Settings are loaded from environment variables or a `.env` file:
+Settings are loaded from environment variables or a `.env` file. Top-level
+settings use the `CALANGO_` namespace; nested settings keep their prefixes:
 
 ```bash
-APP_NAME="My API"
+CALANGO_APP_NAME="My API"
+CALANGO_ENV=production          # development | production | test
+CALANGO_DEBUG=false
 SECURITY__SECRET_KEY="your-key"
 DATABASE__URL="postgresql+asyncpg://user:pass@localhost/db"
 DATABASE__POOL_SIZE=20
 REDIS__URL="redis://localhost:6379/0"
 ```
+
+The unprefixed names `APP_NAME`, `VERSION`, `ENV` and `DEBUG` still work for one
+release cycle, only when the `CALANGO_` variable is absent, and emit a
+`DeprecationWarning` naming the variable to rename (never its value).
 
 ```python
 # Or constructed directly for testing
@@ -98,6 +105,47 @@ settings = CalangoSettings(
 )
 ```
 
+## Database lifecycle
+
+`Calango` owns its database: `app.database` creates the async engine when the
+application starts and disposes it on shutdown. Framework startup runs first,
+then plugin lifespans, then your own `lifespan`; shutdown runs in reverse.
+Request handlers get a session from `calango.core.database.get_db`:
+
+```python
+from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from calango.core.database import get_db
+
+
+@app.get("/orders")
+async def list_orders(session: AsyncSession = Depends(get_db)): ...
+```
+
+Tests can point every session, including the ones plugins use, at a test
+session by overriding both entry points:
+
+```python
+for dependency in (get_db, app.database.session):
+    app.dependency_overrides[dependency] = test_session
+```
+
+## Request guards and mounts
+
+Plugins add application-wide guards with `app.add_request_guard()` or
+`app.add_dependency_request_guard()`. Guards cover every HTTP boundary — API
+routes, Starlette routes and mounted applications, including routers included
+or extended after the guard was registered. Mounts are guarded by default; make
+an intentionally public mount explicit:
+
+```python
+app.mount("/static", static_files, public=True)
+```
+
+WebSocket connections are not guarded; WebSocket endpoints must authenticate
+themselves.
+
 ## Development
 
 ```bash
@@ -105,4 +153,4 @@ uv sync
 uv run pytest packages/calango-core/tests/ -v --cov=calango
 ```
 
-**54 tests · 97% coverage**
+**133 tests**

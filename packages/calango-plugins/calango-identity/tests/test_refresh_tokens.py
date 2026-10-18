@@ -16,6 +16,9 @@ from calango_identity.refresh_tokens import (
 from fakeredis.aioredis import FakeRedis
 
 NOW = datetime(2026, 8, 20, tzinfo=UTC)
+# Redis enforces EXPIREAT with its own wall clock, so Redis-backed stores need a
+# clock anchored to real time; a fixed date silently expires every key once passed.
+REDIS_NOW = datetime.now(UTC).replace(microsecond=0)
 USER_ID = UUID("11111111-1111-1111-1111-111111111111")
 
 
@@ -37,7 +40,7 @@ def redis_store() -> RedisRefreshTokenStore:
         redis,
         lifetime=timedelta(days=7),
         key_prefix="test:refresh",
-        now=lambda: NOW,
+        now=lambda: REDIS_NOW,
         token_factory=lambda: next(secrets),
     )
 
@@ -179,7 +182,7 @@ async def test_redis_rotation_preserves_absolute_expiry(redis_store):
 
 
 async def test_redis_issue_reports_its_integer_storage_expiry():
-    precise_now = NOW.replace(microsecond=123456)
+    precise_now = REDIS_NOW.replace(microsecond=123456)
     store = RedisRefreshTokenStore(
         FakeRedis(decode_responses=True),
         lifetime=timedelta(days=7),
@@ -228,7 +231,7 @@ async def test_redis_rotation_retries_digest_collisions():
         FakeRedis(decode_responses=True),
         lifetime=timedelta(days=7),
         key_prefix="test:refresh",
-        now=lambda: NOW,
+        now=lambda: REDIS_NOW,
         token_factory=lambda: next(secrets),
     )
     issued = await store.issue(USER_ID)
@@ -244,7 +247,7 @@ async def test_redis_failed_rotation_allocation_leaves_source_active():
         FakeRedis(decode_responses=True),
         lifetime=timedelta(days=7),
         key_prefix="test:refresh",
-        now=lambda: NOW,
+        now=lambda: REDIS_NOW,
         token_factory=lambda: token[0],
     )
     issued = await store.issue(USER_ID)
@@ -262,7 +265,7 @@ async def test_redis_issue_raises_after_bounded_digest_collisions():
         FakeRedis(decode_responses=True),
         lifetime=timedelta(days=7),
         key_prefix="test:refresh",
-        now=lambda: NOW,
+        now=lambda: REDIS_NOW,
         token_factory=lambda: "d" * 64,
     )
     await store.issue(USER_ID)
@@ -292,7 +295,7 @@ async def test_redis_concurrent_issue_does_not_claim_one_digest_twice(monkeypatc
             redis,
             lifetime=timedelta(days=7),
             key_prefix="test:refresh",
-            now=lambda: NOW,
+            now=lambda: REDIS_NOW,
             token_factory=lambda: "d" * 64,
         )
         for _ in range(2)
@@ -307,7 +310,7 @@ async def test_redis_concurrent_issue_does_not_claim_one_digest_twice(monkeypatc
 
 
 async def test_redis_expired_token_is_invalid():
-    current_time = [NOW]
+    current_time = [REDIS_NOW]
     store = RedisRefreshTokenStore(
         FakeRedis(decode_responses=True),
         lifetime=timedelta(days=7),
@@ -316,7 +319,7 @@ async def test_redis_expired_token_is_invalid():
         token_factory=lambda: "d" * 64,
     )
     issued = await store.issue(USER_ID)
-    current_time[0] = NOW + timedelta(days=8)
+    current_time[0] = REDIS_NOW + timedelta(days=8)
 
     with pytest.raises(InvalidRefreshToken):
         await store.rotate(issued.token)

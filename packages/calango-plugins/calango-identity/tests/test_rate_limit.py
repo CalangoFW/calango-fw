@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 import pytest
 from calango_identity.models import Base
 from calango_identity.plugin import IdentityPlugin
-from calango_identity.rate_limit import get_email_key, make_limiter
+from calango_identity.rate_limit import get_email_key, make_limiter, resolve_client_ip
 from calango_identity.refresh_tokens import InMemoryRefreshTokenStore
 from calango_identity.settings import IdentitySettings
 from fastapi import FastAPI, Request
@@ -15,13 +15,56 @@ from slowapi.errors import RateLimitExceeded
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from calango import Calango
+from calango.core.database import DatabaseRuntime
 from tests.conftest import TEST_PRIVATE_KEY, TEST_PUBLIC_KEY
+
+
+def _request(client_host: str, forwarded_for: str | None = None) -> Request:
+    headers = [] if forwarded_for is None else [(b"x-forwarded-for", forwarded_for.encode())]
+    return Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/",
+            "headers": headers,
+            "client": (client_host, 12345),
+        }
+    )
 
 
 def test_make_limiter_returns_limiter():
     """make_limiter() returns a slowapi Limiter instance."""
     limiter = make_limiter("memory://")
     assert isinstance(limiter, Limiter)
+
+
+def test_forwarded_for_is_ignored_without_a_trusted_proxy():
+    """A client cannot select its rate-limit key by injecting a forwarding header."""
+    request = _request("198.51.100.10", "203.0.113.4")
+
+    assert resolve_client_ip(request, ()) == "198.51.100.10"
+
+
+def test_forwarded_for_uses_untrusted_client_behind_trusted_proxy_network():
+    """Trusted proxy chains resolve the first non-proxy address from the right."""
+    request = _request("10.0.0.2", "203.0.113.4, 10.0.0.1")
+
+    assert resolve_client_ip(request, ("10.0.0.0/8",)) == "203.0.113.4"
+
+
+def test_malformed_forwarded_for_falls_back_to_trusted_peer():
+    """Malformed forwarding data is never partially trusted for rate limiting."""
+    request = _request("192.0.2.10", "203.0.113.4, unknown")
+
+    assert resolve_client_ip(request, ("192.0.2.10",)) == "192.0.2.10"
+
+
+def test_proxy_cidr_with_host_bits_does_not_trust_forwarded_for():
+    """Noncanonical CIDRs are rejected instead of expanding a trusted range."""
+    request = _request("10.0.0.2", "203.0.113.4")
+
+    assert resolve_client_ip(request, ("10.42.7.9/8",)) == "10.0.0.2"
 
 
 def test_get_email_key_returns_email_from_state():
@@ -76,9 +119,7 @@ async def test_rate_limit_blocks_after_threshold():
 
 
 @pytest.fixture
-async def limited_login_app(
-    monkeypatch: pytest.MonkeyPatch,
-) -> AsyncIterator[Calango]:
+async def limited_login_app() -> AsyncIterator[Calango]:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -88,7 +129,6 @@ async def limited_login_app(
         async with session_factory() as session:
             yield session
 
-    monkeypatch.setattr("calango.core.database.get_db", get_db)
     settings = IdentitySettings(
         PRIVATE_KEY=TEST_PRIVATE_KEY,
         PUBLIC_KEY=TEST_PUBLIC_KEY,
@@ -97,6 +137,7 @@ async def limited_login_app(
         RATE_LIMIT_LOGIN_PER_HOUR_PER_EMAIL=2,
     )
     app = Calango()
+    app.database = DatabaseRuntime(app.settings, session_dependency=get_db)
     app.include_plugin(IdentityPlugin(settings=settings, refresh_store=InMemoryRefreshTokenStore()))
 
     yield app

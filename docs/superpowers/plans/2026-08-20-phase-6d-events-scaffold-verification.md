@@ -85,6 +85,16 @@ git commit -m "feat(identity): deliver account lifecycle events"
 - Consumes: Calango-owned DB lifecycle, plugin migrations, and `IdentityPlugin(events=...)`.
 - Produces: generated project that starts without manual `configure_engine()`.
 
+**Approved design (2026-10-18):** Identity is opt-in through `calango new --identity`
+(plus a wizard question), not on by default and not via `calango plugin add`.
+With the flag the scaffold generates `app/plugins/identity.py` (`identity_plugin()`),
+includes it in `app/main.py`, adds `calango-identity` to `pyproject.toml`, and lists
+`IDENTITY__*` in `.env.example`. `IdentitySettings` reads the shared `.env`. The
+generated `tests/conftest.py` overrides `calango.core.database.get_db` and
+`app.database.session` with the test session and, with Identity, creates an
+ephemeral RS256 key pair when `IDENTITY__PRIVATE_KEY` is unset. Generated
+projects must pass their own `ruff check` and `ruff format --check`.
+
 - [ ] **Step 1: Add a failing generated-project contract test**
 
 ```python

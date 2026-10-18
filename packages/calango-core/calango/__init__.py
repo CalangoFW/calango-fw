@@ -2,7 +2,7 @@ __version__ = "0.1.0-dev"
 
 from calango.config import CalangoSettings
 from calango.core.app import Calango
-from calango.core.database import configure_engine, get_db
+from calango.core.database import DatabaseRuntime, get_db
 from calango.exceptions import (
     AuthenticationError,
     AuthorizationError,
@@ -30,6 +30,7 @@ __all__ = [
     "CalangoSettings",
     "ConfigurationError",
     "ConflictError",
+    "DatabaseRuntime",
     "NotFoundError",
     "OrderDirection",
     "PaginatedResponse",
@@ -37,7 +38,6 @@ __all__ = [
     "ServiceUnavailableError",
     "ValidationError",
     "__version__",
-    "configure_engine",
     "get_db",
     "test_db_session",
 ]
