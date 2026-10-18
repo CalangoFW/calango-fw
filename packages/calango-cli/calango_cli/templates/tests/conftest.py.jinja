@@ -1,15 +1,49 @@
-import pytest
+{% if identity -%}
+import os
+{% endif -%}
+from collections.abc import AsyncIterator
+
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from app.main import app
+from calango.core.database import get_db
+{%- if identity %}
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+{%- endif %}
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
 from app.core.config import Settings
+{%- if identity %}
+
+
+def _ensure_identity_signing_keys() -> None:
+    """Give the test run an ephemeral RS256 key pair unless one is configured."""
+    if os.environ.get("IDENTITY__PRIVATE_KEY"):
+        return
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    os.environ["IDENTITY__PRIVATE_KEY"] = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode()
+    os.environ["IDENTITY__PUBLIC_KEY"] = (
+        key.public_key()
+        .public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        .decode()
+    )
+
+
+_ensure_identity_signing_keys()
+{%- endif %}
 
 settings = Settings()
 
 
 @pytest_asyncio.fixture
-async def db() -> AsyncSession:
+async def db() -> AsyncIterator[AsyncSession]:
     """Isolated database session with automatic rollback per test."""
     engine = create_async_engine(settings.database.URL, echo=False)
     async_session = async_sessionmaker(engine, expire_on_commit=False)
@@ -21,14 +55,17 @@ async def db() -> AsyncSession:
 
 
 @pytest_asyncio.fixture
-async def client(db: AsyncSession) -> AsyncClient:
-    """Async HTTP client backed by the test's isolated db session."""
-    from app.core.database import get_db  # noqa: PLC0415
+async def client(db: AsyncSession) -> AsyncIterator[AsyncClient]:
+    """Async HTTP client whose requests share the test's isolated db session."""
+    # Imported here so test settings (e.g. signing keys) are ready first.
+    from app.main import app
 
-    async def override_get_db():
+    async def override_session() -> AsyncIterator[AsyncSession]:
         yield db
 
-    app.dependency_overrides[get_db] = override_get_db
+    # Resource routers depend on get_db; framework plugins use the app's runtime.
+    for dependency in (get_db, app.database.session):
+        app.dependency_overrides[dependency] = override_session
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",

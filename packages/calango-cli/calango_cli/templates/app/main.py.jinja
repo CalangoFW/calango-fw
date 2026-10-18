@@ -1,5 +1,12 @@
 from calango import Calango
+
 from app.core.config import Settings
+{%- if identity %}
+from app.plugins.identity import identity_plugin
+{%- endif %}
 
 settings = Settings()
 app = Calango(settings=settings)
+{%- if identity %}
+app.include_plugin(identity_plugin())
+{%- endif %}

@@ -1,5 +1,8 @@
+import subprocess
+import sys
 from unittest.mock import patch
 
+import pytest
 from typer.testing import CliRunner
 
 from calango_cli.main import app
@@ -429,3 +432,75 @@ def test_new_creates_seeds_example(tmp_path):
     example = tmp_path / "my-api" / "app" / "seeds" / "001_example.py"
     assert example.exists()
     assert "async def seed(session" in example.read_text()
+
+
+def _generate(tmp_path, *options: str):
+    result = runner.invoke(app, ["new", "my-api", "--path", str(tmp_path), *options])
+    assert result.exit_code == 0, result.output
+    return tmp_path / "my-api"
+
+
+def test_new_env_example_uses_calango_namespace(tmp_path):
+    env_example = (_generate(tmp_path) / ".env.example").read_text()
+    for name in ("CALANGO_APP_NAME=", "CALANGO_ENV=", "CALANGO_DEBUG="):
+        assert name in env_example
+    legacy = [line for line in env_example.splitlines() if line.startswith(("APP_NAME=", "ENV="))]
+    assert legacy == []
+
+
+def test_new_without_identity_does_not_install_identity(tmp_path):
+    project = _generate(tmp_path)
+    assert "identity" not in (project / "app" / "main.py").read_text()
+    assert not (project / "app" / "plugins" / "identity.py").exists()
+    assert "calango-identity" not in (project / "pyproject.toml").read_text()
+    assert "IDENTITY__" not in (project / ".env.example").read_text()
+
+
+def test_new_with_identity_wires_the_plugin(tmp_path):
+    project = _generate(tmp_path, "--identity")
+    main = (project / "app" / "main.py").read_text()
+    plugin_module = (project / "app" / "plugins" / "identity.py").read_text()
+    assert "Calango(settings=settings)" in main
+    assert "app.include_plugin(identity_plugin())" in main
+    assert "IdentityPlugin" in plugin_module
+    assert "IdentityEvents" in plugin_module
+    assert "calango-identity" in (project / "pyproject.toml").read_text()
+    env_example = (project / ".env.example").read_text()
+    for name in ("IDENTITY__PRIVATE_KEY=", "IDENTITY__PUBLIC_KEY=", "IDENTITY__REDIS_URL="):
+        assert name in env_example
+
+
+def test_new_conftest_overrides_framework_session_dependencies(tmp_path):
+    conftest = (_generate(tmp_path) / "tests" / "conftest.py").read_text()
+    assert "app.core.database" not in conftest
+    assert "from calango.core.database import get_db" in conftest
+    assert "app.database.session" in conftest
+
+
+def test_new_identity_conftest_creates_ephemeral_signing_keys(tmp_path):
+    conftest = (_generate(tmp_path, "--identity") / "tests" / "conftest.py").read_text()
+    assert "IDENTITY__PRIVATE_KEY" in conftest
+    assert "generate_private_key" in conftest
+
+
+@pytest.mark.parametrize("options", [(), ("--identity",)], ids=["default", "identity"])
+def test_new_generates_valid_python(tmp_path, options):
+    project = _generate(tmp_path, *options)
+    for source in (project / "app").rglob("*.py"):
+        compile(source.read_text(), str(source), "exec")
+    conftest = project / "tests" / "conftest.py"
+    compile(conftest.read_text(), str(conftest), "exec")
+
+
+@pytest.mark.parametrize("options", [(), ("--identity",)], ids=["default", "identity"])
+def test_new_project_passes_its_own_ruff_gates(tmp_path, options):
+    project = _generate(tmp_path, *options)
+    for arguments in (["check", "."], ["format", "--check", "."]):
+        result = subprocess.run(
+            [sys.executable, "-m", "ruff", *arguments],
+            cwd=project,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr

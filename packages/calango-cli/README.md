@@ -11,11 +11,20 @@ CLI and scaffold for the [Calango Framework](../../README.md).
 ```bash
 calango new my-api
 calango new my-api --db=postgres --ci=github --agents
+calango new my-api --identity
 ```
 
 Generates a fully wired project: Dockerfile, Docker Compose, GitHub Actions CI/CD,
 `CLAUDE.md`, `.cursorrules`, Conventional Commits hooks, and 80% coverage gate —
 all ready to `docker compose up`.
+
+`--identity` also installs the Identity plugin (users, JWT RS256, refresh tokens,
+RBAC): `app/plugins/identity.py` configures it, `app/main.py` includes it, and
+`.env.example` lists the `IDENTITY__*` settings. Its database tables come from
+the plugin's migrations, applied by `calango db migrate`. The generated test
+suite creates a throwaway signing key pair when `IDENTITY__PRIVATE_KEY` is unset.
+Password reset and e-mail verification stay off until you inject an
+`IdentityEvents` provider in `app/plugins/identity.py`.
 
 ### Code generation
 
