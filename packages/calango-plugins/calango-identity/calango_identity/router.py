@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from calango.exceptions import AuthenticationError, ServiceUnavailableError
 from calango_identity.dependencies import identity_public
+from calango_identity.events import IdentityEvents
 from calango_identity.manager import UserManager, make_get_user_manager
 from calango_identity.models import User
 from calango_identity.rate_limit import capture_login_email, get_email_key
@@ -111,10 +112,11 @@ async def _parse_refresh_token(request: Request) -> str:
 def make_fastapi_users(
     settings: IdentitySettings,
     get_db: Callable,
+    events: IdentityEvents | None = None,
 ) -> FastAPIUsers[User, uuid.UUID]:
     """Build the shared FastAPI Users object for routers and global auth."""
     auth_backend = make_auth_backend(settings)
-    get_user_manager_factory = make_get_user_manager(settings)
+    get_user_manager_factory = make_get_user_manager(settings, events)
 
     async def _get_user_manager(session: AsyncSession = Depends(get_db)):  # noqa: B008
         async for manager in get_user_manager_factory(session):
@@ -129,6 +131,10 @@ def make_auth_router(
     refresh_store: RefreshTokenStore,
     limiter: Limiter,
     fastapi_users: FastAPIUsers[User, uuid.UUID] | None = None,
+    *,
+    events: IdentityEvents | None = None,
+    enable_password_reset: bool = False,
+    enable_verification: bool = False,
 ) -> APIRouter:
     """Build and return the auth APIRouter wired to the given session dependency.
 
@@ -138,8 +144,11 @@ def make_auth_router(
         refresh_store: persistence for issuing and rotating refresh tokens.
         limiter: shared SlowAPI limiter also installed on the application.
         fastapi_users: optional shared authentication bundle from the plugin.
+        events: provider that receives account events and delivery tokens.
+        enable_password_reset: include the forgot/reset-password endpoints.
+        enable_verification: include the request-verify/verify endpoints.
     """
-    fu = fastapi_users or make_fastapi_users(settings, get_db)
+    fu = fastapi_users or make_fastapi_users(settings, get_db, events)
     get_user_manager = fu.get_user_manager
 
     router = APIRouter()
@@ -227,11 +236,18 @@ def make_auth_router(
         prefix="/auth",
         tags=["auth"],
     )
-    router.include_router(
-        _mark_identity_public_routes(fu.get_reset_password_router()),
-        prefix="/auth",
-        tags=["auth"],
-    )
+    if enable_password_reset:
+        router.include_router(
+            _mark_identity_public_routes(fu.get_reset_password_router()),
+            prefix="/auth",
+            tags=["auth"],
+        )
+    if enable_verification:
+        router.include_router(
+            _mark_identity_public_routes(fu.get_verify_router(UserRead)),
+            prefix="/auth",
+            tags=["auth"],
+        )
     router.include_router(
         fu.get_users_router(UserRead, UserUpdate),
         prefix="/users",

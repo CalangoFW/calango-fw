@@ -20,6 +20,7 @@ from calango_identity.dependencies import (
     make_authentication_guard,
     make_optional_current_user_resolver,
 )
+from calango_identity.events import IdentityEvents, LoggingIdentityEvents
 from calango_identity.rate_limit import make_limiter
 from calango_identity.refresh_tokens import RedisRefreshTokenStore, RefreshTokenStore
 from calango_identity.router import make_auth_router, make_fastapi_users
@@ -50,8 +51,15 @@ class IdentityPlugin:
         settings: IdentitySettings | None = None,
         refresh_store: RefreshTokenStore | None = None,
         limiter: Limiter | None = None,
+        *,
+        events: IdentityEvents | None = None,
+        enable_password_reset: bool = False,
+        enable_verification: bool = False,
     ) -> None:
         self._settings = settings or IdentitySettings()
+        self._events = events
+        self._enable_password_reset = enable_password_reset
+        self._enable_verification = enable_verification
         self._owned_limiter: Limiter | None = None
         if limiter is None:
             limiter = make_limiter(
@@ -76,6 +84,7 @@ class IdentityPlugin:
         """Register auth routers, rate limiter, and exception handler."""
         if not isinstance(app, Calango):
             raise TypeError("IdentityPlugin requires a Calango application")
+        events = self._resolve_events(app.settings.ENV)
 
         # Rate limiting middleware
         app.state.limiter = self._limiter
@@ -84,7 +93,7 @@ class IdentityPlugin:
         app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # ty: ignore[invalid-argument-type]
 
         session_dependency = app.database.session
-        fastapi_users = make_fastapi_users(self._settings, session_dependency)
+        fastapi_users = make_fastapi_users(self._settings, session_dependency, events)
         resolver = make_optional_current_user_resolver(self._settings, session_dependency)
         install_user_resolver(app, resolver)
         app.add_dependency_request_guard(
@@ -98,6 +107,9 @@ class IdentityPlugin:
             refresh_store=self.refresh_store,
             limiter=self._limiter,
             fastapi_users=fastapi_users,
+            events=events,
+            enable_password_reset=self._enable_password_reset,
+            enable_verification=self._enable_verification,
         )
         app.include_router(auth_router)
 
@@ -109,6 +121,22 @@ class IdentityPlugin:
                 await self._close_owned_resources()
 
         app.add_plugin_lifespan(owned_resource_lifespan)
+
+    def _resolve_events(self, env: str) -> IdentityEvents | None:
+        """Pick the events provider, failing at startup on unsafe production setups."""
+        if env != "production":
+            return self._events or LoggingIdentityEvents()
+        if isinstance(self._events, LoggingIdentityEvents):
+            raise RuntimeError(
+                "LoggingIdentityEvents is development-only; inject an IdentityEvents "
+                "provider that delivers tokens in production"
+            )
+        if self._events is None and (self._enable_password_reset or self._enable_verification):
+            raise RuntimeError(
+                "Password reset and verification endpoints need an IdentityEvents "
+                "provider in production: pass IdentityPlugin(events=...)"
+            )
+        return self._events
 
     async def _close_owned_resources(self) -> None:
         """Close constructed async and sync backends at the end of each lifespan.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -58,28 +59,89 @@ def limiter() -> Limiter:
     return make_limiter("memory://")
 
 
+class DeliveryRecorder:
+    """Identity events provider that records delivered tokens by user id."""
+
+    def __init__(self) -> None:
+        self.password_resets: list[tuple[str, str]] = []
+        self.verifications: list[tuple[str, str]] = []
+
+    async def on_registered(self, user, request) -> None:
+        pass
+
+    async def on_login(self, user, request, response) -> None:
+        pass
+
+    async def send_password_reset(self, user, token: str, request) -> None:
+        self.password_resets.append((str(user.id), token))
+
+    async def send_verification(self, user, token: str, request) -> None:
+        self.verifications.append((str(user.id), token))
+
+
+class FailingDelivery(DeliveryRecorder):
+    async def send_password_reset(self, user, token: str, request) -> None:
+        raise RuntimeError("provider outage")
+
+
+@pytest.fixture
+def delivered() -> DeliveryRecorder:
+    return DeliveryRecorder()
+
+
+@asynccontextmanager
+async def _serve_auth_router(session: AsyncSession, **router_options):
+    app = Calango()
+    app.state.limiter = router_options["limiter"]
+
+    # Pass a dependency that yields the test session
+    async def get_db():
+        yield session
+
+    app.include_router(
+        make_auth_router(
+            get_db=get_db,
+            enable_password_reset=True,
+            enable_verification=True,
+            **router_options,
+        )
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac
+
+
 @pytest.fixture
 async def client(
     session: AsyncSession,
     settings: IdentitySettings,
     refresh_store: InMemoryRefreshTokenStore,
     limiter: Limiter,
+    delivered: DeliveryRecorder,
 ):
-    app = Calango()
-    app.state.limiter = limiter
-
-    # Pass a dependency that yields the test session
-    async def get_db():
-        yield session
-
-    router = make_auth_router(
+    async with _serve_auth_router(
+        session,
         settings=settings,
-        get_db=get_db,
         refresh_store=refresh_store,
         limiter=limiter,
-    )
-    app.include_router(router)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        events=delivered,
+    ) as ac:
+        yield ac
+
+
+@pytest.fixture
+async def failing_delivery_client(
+    session: AsyncSession,
+    settings: IdentitySettings,
+    refresh_store: InMemoryRefreshTokenStore,
+    limiter: Limiter,
+):
+    async with _serve_auth_router(
+        session,
+        settings=settings,
+        refresh_store=refresh_store,
+        limiter=limiter,
+        events=FailingDelivery(),
+    ) as ac:
         yield ac
 
 
@@ -496,6 +558,45 @@ async def test_refresh_response_is_not_cacheable(client):
     assert response.status_code == 200, response.text
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["pragma"] == "no-cache"
+
+
+async def test_forgot_password_delivers_reset_token_to_provider(client, delivered):
+    registered = await client.post(
+        "/auth/register",
+        json={"email": "reset@example.com", "password": "SecurePassword123!"},
+    )
+    response = await client.post("/auth/forgot-password", json={"email": "reset@example.com"})
+
+    assert response.status_code == 202
+    assert [(user_id, bool(token)) for user_id, token in delivered.password_resets] == [
+        (registered.json()["id"], True)
+    ]
+
+
+async def test_forgot_password_provider_failure_matches_unknown_email(failing_delivery_client):
+    await register_user(failing_delivery_client, "known@example.com")
+    known = await failing_delivery_client.post(
+        "/auth/forgot-password", json={"email": "known@example.com"}
+    )
+    unknown = await failing_delivery_client.post(
+        "/auth/forgot-password", json={"email": "missing@example.com"}
+    )
+
+    assert known.status_code == unknown.status_code == 202
+    assert known.json() == unknown.json()
+
+
+async def test_request_verify_token_delivers_verification_token(client, delivered):
+    registered = await client.post(
+        "/auth/register",
+        json={"email": "verify@example.com", "password": "SecurePassword123!"},
+    )
+    response = await client.post("/auth/request-verify-token", json={"email": "verify@example.com"})
+
+    assert response.status_code == 202
+    assert [(user_id, bool(token)) for user_id, token in delivered.verifications] == [
+        (registered.json()["id"], True)
+    ]
 
 
 async def test_forgot_password_returns_202(client):
