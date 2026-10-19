@@ -118,12 +118,17 @@ later request, including in-process test transports.
 
 ### Database context
 
-The plugin registers one SQLAlchemy `after_begin` listener on `Session` (once per
-process). At the start of every transaction on a PostgreSQL connection it runs
+The plugin registers SQLAlchemy listeners on `Session` (once per process). At the
+start of every transaction on a PostgreSQL connection (`after_begin`) it runs
 `SELECT set_config('app.current_tenant_id', :tenant_id, true)` with a bound
 parameter: the current tenant id, or `''` when there is none (clearing any stale
-value). The setting is transaction-local, so it is safe with connection pools and
-PgBouncer transaction pooling, and it is applied again after every `commit()`.
+value). Because a request's session can begin its transaction before the tenant
+is resolved (the membership lookup may share the session), the listeners also
+re-apply the setting before each statement (`do_orm_execute`) and flush
+(`before_flush`) whenever the context tenant differs from the one applied in the
+current transaction. The setting is transaction-local, so it is safe with
+connection pools and PgBouncer transaction pooling, and it is applied again after
+every `commit()`.
 Every session — `get_db`, `app.database.session`, Identity's resolver, test
 sessions — passes through the listener. Non-PostgreSQL connections are skipped;
 startup rejects them anyway.
@@ -266,7 +271,14 @@ project passes its own tests and static gates.
 | 7a | Ordered dependency guards in core; plugin package skeleton; `tenants`/`tenant_memberships` models and migration |
 | 7b | Resolver, tenant guard, request context middleware, `set_config` listener, `tenant_scope`, dependencies; isolation integration tests |
 | 7c | `TenantScoped`, Alembic operations and rewriter via `PluginMigration.autogenerate`, startup checks |
-| 7d | Tenant and member endpoints, `calango new --multitenancy`, `generate resource --tenant-scoped`, application role in generated projects, end-to-end test, documentation |
+| 7d | Request unit of work (`get_db` commits successful requests, `DbSession`), tenant and member endpoints, `calango new --multitenancy`, `generate resource --tenant-scoped`, application role in generated projects, end-to-end test, documentation |
+
+**Amendment (2026-10-18, during planning):** nothing in Calango committed request
+transactions, so generated resources silently discarded their writes. Approved fix:
+`get_db` becomes a per-request unit of work — commit when the handler succeeds,
+roll back on error — exposed as `DbSession =
+Annotated[AsyncSession, Depends(get_db, scope="function")]` so the commit runs
+before the response is sent and a failed commit becomes an error response.
 
 Phase 7 is complete when every repository gate passes (`ruff check`,
 `ruff format --check`, `ty check packages/`, the full test suite including
